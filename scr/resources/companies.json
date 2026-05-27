@@ -1,0 +1,17 @@
+{
+    "insurance": [
+        {"name": "盛唐融信"},
+        {"name": "君康经纪"}
+    ],
+    "commercial": [
+        {"name": "北京中言"},
+        {"name": "大连凯丹"},
+        {"name": "福建钱隆"},
+        {"name": "春夏秋冬"},
+        {"name": "重庆宜新"}
+    ],
+    "hotel": [
+        {"name": "伯豪瑞廷", "is_bhrt": true},
+        {"name": "重庆瑞尔", "is_bhrt": false}
+    ]
+}

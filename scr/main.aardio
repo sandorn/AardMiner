@@ -1,0 +1,483 @@
+// main.aardio -- AardMiner 入口
+// 功能: 加载配置, 初始化Excel COM, 编排三阶段执行流程, 提供桌面UI
+// 三个阶段:
+//   1. 数据汇总: report_copy → insurance → commercial → hotel
+//   2. 板块AI分析: 商写 → 保险 → 酒店
+//   3. 公司AI分析: 9家逐公司
+
+import win.ui;
+import string;
+import io;
+import fsys;
+import models;
+import config;
+import excel;
+import common;
+import report_copy;
+import insurance;
+import commercial;
+import hotel;
+import deepseek_api;
+import sector_analysis;
+import company_analysis;
+
+// ============================================================
+// 全局日志
+// ============================================================
+var _logLines = {};
+var _logEdit = null;
+
+var log = function(msg) {
+    var tm = time();
+    var ts = string.format("%02d:%02d:%02d", tm.hour, tm.minute, tm.second);
+    var line = ts + "  " + msg;
+    table.push(_logLines, line);
+
+    if (_logEdit) {
+        _logEdit.text = string.join(_logLines, '\r\n');
+        // 自动滚动到底部
+        var len = #_logEdit.text;
+        _logEdit.setsel(len, len);
+        _logEdit.scrollCaret();
+    }
+}
+
+// 将全局 print 重定向到 UI 日志，使 lib/*.aardio 中的 ..print() 输出到界面
+..print = function(msg) {
+    log(tostring(msg));
+}
+
+// ============================================================
+// 配置文件路径（多级回退，确保在各种运行环境下都能找到 project.toml）
+// ============================================================
+var _configPath = function() {
+    // 方法1: 基于应用程序根目录（IDE 中运行 = 项目目录，发布后 = EXE 目录）
+    var path = io.fullpath("/project.toml");
+    if (io.exist(path)) return path;
+
+    // 方法2: 基于当前工作目录
+    path = io.fullpath("project.toml");
+    if (io.exist(path)) return path;
+
+    // 方法3: 上级目录（兼容旧位置 ../project.toml）
+    path = io.fullpath("../project.toml");
+    if (io.exist(path)) return path;
+
+    // 都不存在则返回方法1的路径，让 config.loadAll 输出友好警告
+    return io.fullpath("/project.toml");
+}
+
+// ============================================================
+// 创建 UI
+// ============================================================
+/*DSG{{*/
+	var winform = win.form(text="AardMiner -- 经营数据汇总分析";right=780;bottom=560;minHeight=400;minWidth=640)
+	winform.add(
+	btnBrowseDir={cls="button";text="...";left=712;top=32;right=748;bottom=52;z=25};
+	btnBrowseFile={cls="button";text="...";left=712;top=56;right=748;bottom=76;z=26};
+	btnCompany={cls="button";text="公司分析";left=364;top=128;right=468;bottom=158;z=11};
+	btnSector={cls="button";text="业态分析";left=248;top=128;right=352;bottom=158;z=10};
+	btnSummary={cls="button";text="数据汇总";left=132;top=128;right=236;bottom=158;z=9};
+	editDataDir={cls="edit";text="";left=100;top=32;right=708;bottom=52;z=14};
+	editModel={cls="edit";text="";left=250;top=80;right=410;bottom=100;z=22};
+	editMonth={cls="edit";text="";left=60;top=80;right=96;bottom=100;z=18};
+	editOutputFile={cls="edit";text="";left=100;top=56;right=708;bottom=76;z=16};
+	editYear={cls="edit";text="";left=150;top=80;right=196;bottom=100;z=20};
+	lblApiKey={cls="static";text="API Key: --";left=420;top=82;right=600;bottom=100;z=23};
+	lblConfigTitle={cls="static";text="运行配置";left=16;top=12;right=100;bottom=28;bold=1;z=3};
+	lblCtrlTitle={cls="static";text="执行控制";left=16;top=106;right=100;bottom=122;bold=1;z=6};
+	lblDataDir={cls="static";text="数据源目录:";left=16;top=34;right=96;bottom=52;z=13};
+	lblLogTitle={cls="static";text="运行日志";left=16;top=172;right=100;bottom=188;bold=1;z=1};
+	lblModel={cls="static";text="模型:";left=206;top=82;right=246;bottom=100;z=21};
+	lblMonth={cls="static";text="月份:";left=16;top=82;right=56;bottom=100;z=17};
+	lblOutputFile={cls="static";text="结果文件:";left=16;top=58;right=96;bottom=76;z=15};
+	lblStatus={cls="static";text="状态: 就绪";left=16;top=530;right=748;bottom=546;z=7};
+	lblYear={cls="static";text="年份:";left=106;top=82;right=146;bottom=100;z=19};
+	logEdit={cls="edit";left=16;top=196;right=748;bottom=520;multiline=1;readonly=1;vscroll=1;wrap=1;z=12}
+	)
+	/*}}*/
+
+// ============================================================
+// 耗时格式化 (避免 string.format("%d", float) 触发 toInt 错误)
+// ============================================================
+var _formatElapsed = function(seconds) {
+    var m = math.floor(seconds / 60);
+    var s = math.floor(seconds % 60);
+    var sStr = tostring(s);
+    if (s < 10) sStr = "0" + sStr;
+    return tostring(m) + "分" + sStr + "秒";
+}
+
+// ============================================================
+// 目录/文件选择
+// ============================================================
+winform.btnBrowseDir.oncommand = function(id, event) {
+    import fsys.dlg;
+    var dir = fsys.dlg.openDir(winform.editDataDir.text, "选择数据源目录");
+    if (#dir > 0) winform.editDataDir.text = dir;
+};
+
+winform.btnBrowseFile.oncommand = function(id, event) {
+    import fsys.dlg;
+    var filter = "Excel工作簿|*.xlsx|所有文件|*.*";
+    var file = fsys.dlg.open(filter, "选择结果文件", winform.editOutputFile.text);
+    if (#file > 0) winform.editOutputFile.text = file;
+};
+
+// ============================================================
+// 从 UI 编辑框保存配置到 TOML 文件
+// ============================================================
+var _saveConfigFromUI = function() {
+    var configPath = _configPath();
+    var cfg = config.loadAll(configPath);
+
+    // 从编辑框读取值并更新 cfg
+    var srcPath = ..string.trim(winform.editDataDir.text);
+    if (#srcPath > 0) cfg.sourcePath = srcPath;
+
+    var outPath = ..string.trim(winform.editOutputFile.text);
+    if (#outPath > 0) cfg.outputPath = outPath;
+
+    var m = tonumber(..string.trim(winform.editMonth.text));
+    if (m && m >= 1 && m <= 12) cfg.targetMonth = m;
+
+    var y = tonumber(..string.trim(winform.editYear.text));
+    if (y && y >= 2000 && y <= 2100) cfg.targetYear = y;
+
+    var model = ..string.trim(winform.editModel.text);
+    if (#model > 0) cfg.model = model;
+
+    config.saveProjectConfig(cfg, configPath);
+    log("配置已保存至 " + configPath);
+
+    // 同时将月份/年份写入结果文件的"填写页"sheet
+    try {
+        var excelPath = ..string.trim(winform.editOutputFile.text);
+        if (#excelPath > 0 && ..io.exist(excelPath)) {
+            if (..excel.init()) {
+                var wb = ..excel.openWorkbook(excelPath, false);
+                if (wb && ..excel.sheetExists(wb, "填写页")) {
+                    var ws = ..excel.getSheet(wb, "填写页");
+                    if (cfg.targetMonth >= 1 && cfg.targetMonth <= 12) {
+                        ..excel.writeCell(ws, 2, 1, cfg.targetMonth);
+                    }
+                    if (cfg.targetYear >= 2000 && cfg.targetYear <= 2100) {
+                        ..excel.writeCell(ws, 4, 1, cfg.targetYear);
+                    }
+                    ..excel.saveWorkbook(wb);
+                    log("已将月份/年份写入结果文件填写页");
+                }
+                ..excel.closeWorkbook(wb);
+                ..excel.close();
+            }
+        }
+    } catch (e) {
+        // Excel 写入失败不影响 TOML 保存
+    }
+};
+
+// ============================================================
+// 按钮状态管理
+// ============================================================
+var _setButtonsEnabled = function(enabled) {
+    winform.btnSummary.disabled = !enabled;
+    winform.btnSector.disabled = !enabled;
+    winform.btnCompany.disabled = !enabled;
+}
+
+// ============================================================
+// 配置加载与显示
+// ============================================================
+var _loadAndDisplayConfig = function() {
+    var cfg = config.loadAll(_configPath());
+
+    // 填充可编辑配置项（路径中的双反斜杠转为单反斜杠显示）
+    winform.editDataDir.text = ..string.replace(cfg.sourcePath, "\\\\", "\\");
+    winform.editOutputFile.text = ..string.replace(cfg.outputPath, "\\\\", "\\");
+    winform.editMonth.text = tostring(cfg.targetMonth);
+    winform.editYear.text = tostring(cfg.targetYear);
+    winform.editModel.text = cfg.model;
+    winform.lblApiKey.text = "API Key: " + (#cfg.apiKey > 0 ? "已配置" : "未配置");
+
+    return cfg;
+}
+
+// ============================================================
+// 阶段1: 数据汇总
+// ============================================================
+var _runPhase1 = function(cfg, outputWb) {
+    log("=== 阶段1: 数据汇总 ===");
+
+    // 自动检测月份/年份
+    if (cfg.targetMonth == 0 || cfg.targetYear == 0) {
+        log("  正在从输出文件自动检测月份/年份...");
+        if (..excel.sheetExists(outputWb, "填写页")) {
+            var wsConfig = ..excel.getSheet(outputWb, "填写页");
+            if (cfg.targetMonth == 0) {
+                cfg.targetMonth = ..common.GetTargetMonth(wsConfig);
+                log("  检测到报告月份: " + cfg.targetMonth + "月");
+            }
+            if (cfg.targetYear == 0) {
+                cfg.targetYear = tonumber(..common.GetYearFromConfig(wsConfig));
+                if (cfg.targetYear > 0) {
+                    log("  检测到报告年份: " + cfg.targetYear);
+                }
+            }
+            cfg.progressPercent = ..common.GetProgressFromConfig(wsConfig, cfg.targetMonth);
+            if (cfg.progressPercent > 0) {
+                log("  检测到序时进度: " + string.format("%.2f", cfg.progressPercent) + "%");
+            }
+            // 更新 UI 配置项（自动检测后回填）
+            winform.editMonth.text = tostring(cfg.targetMonth);
+            winform.editYear.text = tostring(cfg.targetYear);
+        }
+    }
+
+    if (cfg.targetMonth < 1 || cfg.targetMonth > 12) {
+        log("错误: 无法确定报告月份，数据汇总终止");
+        return 0;
+    }
+
+    var ok = 0;
+
+    // 经营报表复制 (9家)
+    ok = ..report_copy.run(cfg, outputWb);
+    log("");
+
+    // 保险汇总 (2家) - 每个子步骤独立容错
+    try {
+        ok = ok + ..insurance.run(cfg, outputWb);
+    } catch (e) {
+        log("保险汇总执行异常: " + tostring(e));
+    }
+    log("");
+
+    // 商写汇总 (2家)
+    try {
+        ok = ok + ..commercial.run(cfg, outputWb);
+    } catch (e) {
+        log("商写汇总执行异常: " + tostring(e));
+    }
+    log("");
+
+    // 酒店汇总 (2家)
+    try {
+        ok = ok + ..hotel.run(cfg, outputWb);
+    } catch (e) {
+        log("酒店汇总执行异常: " + tostring(e));
+    }
+    log("");
+
+    // 保存
+    ..excel.saveWorkbook(outputWb);
+    log("数据汇总已保存");
+    return ok;
+}
+
+// ============================================================
+// 阶段2: 板块AI分析
+// ============================================================
+var _runPhase2 = function(cfg, outputWb) {
+    log("=== 阶段2: 板块AI分析 ===");
+
+    if (#cfg.apiKey == 0) {
+        log("错误: 未配置 API Key，跳过板块分析");
+        return 0;
+    }
+
+    var ok = ..sector_analysis.runAll(cfg, outputWb);
+    ..excel.saveWorkbook(outputWb);
+    log("板块分析已保存");
+    return ok;
+}
+
+// ============================================================
+// 阶段3: 公司AI分析
+// ============================================================
+var _runPhase3 = function(cfg, outputWb) {
+    log("=== 阶段3: 公司核心指标分析 ===");
+
+    if (#cfg.apiKey == 0) {
+        log("错误: 未配置 API Key，跳过公司分析");
+        return 0;
+    }
+
+    var ok = ..company_analysis.runAll(cfg, outputWb);
+    ..excel.saveWorkbook(outputWb);
+    log("公司分析已保存");
+    return ok;
+}
+
+// ============================================================
+// 按钮事件: 数据汇总
+// ============================================================
+winform.btnSummary.oncommand = function(id, event) {
+    _setButtonsEnabled(false);
+
+    var startTick = time.tick();
+
+    try {
+        _saveConfigFromUI();
+        var cfg = _loadAndDisplayConfig();
+
+        if (!..excel.init()) {
+            log("错误: Excel 初始化失败");
+            winform.lblStatus.text = "状态: Excel 初始化失败";
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        var outputWb = ..excel.openWorkbook(cfg.outputPath, false);
+        if (!outputWb) {
+            log("错误: 无法打开输出文件");
+            ..excel.close();
+            winform.lblStatus.text = "状态: 无法打开输出文件";
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        _runPhase1(cfg, outputWb);
+        ..excel.close();
+
+        var elapsed = (time.tick() - startTick) / 1000.0;
+        var elapsedStr = _formatElapsed(elapsed);
+        log("");
+        log("=== 数据汇总完成 ===");
+        winform.lblStatus.text = "状态: 数据汇总完成，共耗时 " + elapsedStr;
+    }
+    catch (e) {
+        log("错误: " + tostring(e));
+        try { ..excel.close(); } catch (e2) {}
+        winform.lblStatus.text = "状态: 执行出错";
+    }
+
+    _setButtonsEnabled(true);
+}
+
+// ============================================================
+// 按钮事件: 业态分析
+// ============================================================
+winform.btnSector.oncommand = function(id, event) {
+    _setButtonsEnabled(false);
+
+    var startTick = time.tick();
+
+    try {
+        _saveConfigFromUI();
+        var cfg = _loadAndDisplayConfig();
+
+        if (#cfg.apiKey == 0) {
+            log("错误: 未配置 API Key");
+            winform.lblStatus.text = "状态: 未配置 API Key";
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        if (!..excel.init()) {
+            log("错误: Excel 初始化失败");
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        var outputWb = ..excel.openWorkbook(cfg.outputPath, false);
+        if (!outputWb) {
+            log("错误: 无法打开输出文件");
+            ..excel.close();
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        _runPhase2(cfg, outputWb);
+        ..excel.close();
+
+        var elapsed = (time.tick() - startTick) / 1000.0;
+        var elapsedStr = _formatElapsed(elapsed);
+        log("");
+        log("=== 业态分析完成 ===");
+        winform.lblStatus.text = "状态: 业态分析完成，共耗时 " + elapsedStr;
+    }
+    catch (e) {
+        log("错误: " + tostring(e));
+        try { ..excel.close(); } catch (e2) {}
+        winform.lblStatus.text = "状态: 执行出错";
+    }
+
+    _setButtonsEnabled(true);
+}
+
+// ============================================================
+// 按钮事件: 公司分析
+// ============================================================
+winform.btnCompany.oncommand = function(id, event) {
+    _setButtonsEnabled(false);
+
+    var startTick = time.tick();
+
+    try {
+        _saveConfigFromUI();
+        var cfg = _loadAndDisplayConfig();
+
+        if (#cfg.apiKey == 0) {
+            log("错误: 未配置 API Key");
+            winform.lblStatus.text = "状态: 未配置 API Key";
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        if (!..excel.init()) {
+            log("错误: Excel 初始化失败");
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        var outputWb = ..excel.openWorkbook(cfg.outputPath, false);
+        if (!outputWb) {
+            log("错误: 无法打开输出文件");
+            ..excel.close();
+            _setButtonsEnabled(true);
+            return;
+        }
+
+        _runPhase3(cfg, outputWb);
+        ..excel.close();
+
+        var elapsed = (time.tick() - startTick) / 1000.0;
+        var elapsedStr = _formatElapsed(elapsed);
+        log("");
+        log("=== 公司分析完成 ===");
+        winform.lblStatus.text = "状态: 公司分析完成，共耗时 " + elapsedStr;
+    }
+    catch (e) {
+        log("错误: " + tostring(e));
+        try { ..excel.close(); } catch (e2) {}
+        winform.lblStatus.text = "状态: 执行出错";
+    }
+
+    _setButtonsEnabled(true);
+}
+
+// ============================================================
+// 窗口关闭
+// ============================================================
+winform.onClose = function() {
+    try { ..excel.close(); } catch (e) {}
+    winform.close();
+}
+
+// ============================================================
+// 启动
+// ============================================================
+_logEdit = winform.logEdit;
+
+var cfg = _loadAndDisplayConfig();
+log("AardMiner 启动");
+log("数据源: " + cfg.sourcePath);
+log("结果文件: " + cfg.outputPath);
+log("公司数量: " + #cfg.allCompanies);
+log("API Key: " + (#cfg.apiKey > 0 ? "已配置" : "未配置"));
+log("模型: " + cfg.model);
+log("");
+log("点击按钮开始执行");
+
+winform.show();
+win.loopMessage();

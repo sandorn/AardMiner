@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<project name="AardMiner" ui="win" output="AardMiner.exe" dstrip="false" CompanyName="AardMiner" FileDescription="经营数据汇总分析工具" LegalCopyright="Copyright (C) 2025" ProductName="AardMiner" InternalName="AardMiner" FileVersion="0.0.1.3" ProductVersion="0.0.1.3" publishDir="/Publish/" local="false" libEmbed="false" ignored="false">
+	<file name="main" path="main.aardio"/>
+	<folder name="resources" path="resources" local="false" embed="false" ignored="false">
+		<file name="companies.json" path="resources\companies.json"/>
+		<folder name="prompts" path="resources\prompts">
+			<file name="保险分析.md" path="resources\prompts\保险分析.md"/>
+			<file name="商写分析.md" path="resources\prompts\商写分析.md"/>
+			<file name="酒店分析.md" path="resources\prompts\酒店分析.md"/>
+			<file name="财务分析师.md" path="resources\prompts\财务分析师.md"/>
+		</folder>
+	</folder>
+</project>
