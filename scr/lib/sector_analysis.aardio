@@ -1,0 +1,270 @@
+// sector_analysis.aardio -- 板块AI分析 (商写/保险/酒店)
+// 对应 VBA: 业态分析整合版.bas
+// 功能: 从输出文件读取业态数据, 构建数据提示词, 调用 DeepSeek API, 写入分析结果
+// 参数: timeout=30s, tokens=1000, 无质量评分, HTTP重试3次
+// 入口: sector_analysis.runAll(cfg, outputWb)
+
+namespace sector_analysis {
+
+    // ---- 商写业态配置 ----
+    _OS_SHEET = "商写类";
+    _OS_DATA_RANGE = "A1:G18";
+    _OS_RESULT_CELL = "L14";
+
+    // ---- 保险业态配置 ----
+    _INS_SHEET = "保险类";
+    _INS_DATA_RANGE = "F1:H25";
+    _INS_RESULT_CELL = "L14";
+
+    // ---- 酒店业态配置 ----
+    _HTL_SHEET = "酒店类";
+    _HTL_RANGE_MARKETING = "B1:D5";
+    _HTL_RANGE_OTA = "E1:G13";
+    _HTL_RANGE_OCC = "I1:K13";
+    _HTL_RESULT_CELL = "M14";
+
+    // ============================================================
+    // runAll -- 运行三个业态分析
+    // 对应 VBA: 业态分析整合版.bas 运行所有业态分析 (Lines 32-42)
+    // ============================================================
+    runAll = function(cfg, outputWb) {
+        ..print("=== 板块AI分析 ===");
+
+        if (#cfg.apiKey == 0) {
+            ..print("错误: 未配置 API Key，跳过板块分析");
+            return 0;
+        }
+
+        var count = 0;
+
+        ..print("  [1/3] 商写业态分析 ...");
+        if (runCommercial(cfg, outputWb)) count = count + 1;
+
+        ..print("  [2/3] 保险业态分析 ...");
+        if (runInsurance(cfg, outputWb)) count = count + 1;
+
+        ..print("  [3/3] 酒店业态分析 ...");
+        if (runHotel(cfg, outputWb)) count = count + 1;
+
+        ..print("板块AI分析完成: " + tostring(count) + "/3");
+        return count;
+    }
+
+    // ============================================================
+    // runCommercial -- 商写业态分析
+    // 对应 VBA: 业态分析整合版.bas 运行商写业态分析 (Lines 48-80)
+    // ============================================================
+    runCommercial = function(cfg, outputWb) {
+        if (!..excel.sheetExists(outputWb, _OS_SHEET)) {
+            ..print("    [跳过] 未找到 '" + _OS_SHEET + "' Sheet");
+            return false;
+        }
+
+        var systemMsg = cfg.prompts.commercial;
+        if (#systemMsg == 0) {
+            ..print("    [跳过] 系统提示词为空 (commercial)");
+            return false;
+        }
+
+        var ws = ..excel.getSheet(outputWb, _OS_SHEET);
+        var dataArray = ..excel.readRange(ws, _OS_DATA_RANGE);
+        if (!dataArray) {
+            ..print("    [跳过] 数据区域读取失败: " + _OS_DATA_RANGE);
+            return false;
+        }
+
+        var dataPrompt = "请对以下商写租赁类子公司数据进行客观分析，并按系统提示词指定格式输出。" +
+            '\r\n' + ..deepseek_api.BuildDataPrompt(dataArray);
+
+        var apiResponse = ..deepseek_api.CallDeepSeekAPI(
+            dataPrompt, cfg.apiKey, "https://api.deepseek.com", cfg.model,
+            0.3, cfg.sectorMaxTokens, cfg.sectorTimeoutMs,
+            _OS_SHEET, false, 3, systemMsg);
+
+        var analysisResult;
+        if (#apiResponse > 0 && ..string.startsWith(apiResponse, "{")) {
+            analysisResult = ..deepseek_api.ParseAPIResponseSimple(apiResponse);
+        } else {
+            analysisResult = apiResponse;
+        }
+
+        analysisResult = ..deepseek_api.CleanAnalysisResult(analysisResult);
+
+        if (#analysisResult > 0 && !..string.startsWith(analysisResult, "[")) {
+            ..deepseek_api.WriteAnalysisResult(ws, _OS_RESULT_CELL, analysisResult);
+            ..print("    完成");
+            return true;
+        } else {
+            ..print("    [失败] " + analysisResult);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // runInsurance -- 保险业态分析
+    // 对应 VBA: 业态分析整合版.bas 运行保险业态分析 (Lines 86-120)
+    // 特殊处理: BuildInsuranceDataPrompt 过滤未来月份
+    // ============================================================
+    runInsurance = function(cfg, outputWb) {
+        if (!..excel.sheetExists(outputWb, _INS_SHEET)) {
+            ..print("    [跳过] 未找到 '" + _INS_SHEET + "' Sheet");
+            return false;
+        }
+
+        var systemMsg = cfg.prompts.insurance;
+        if (#systemMsg == 0) {
+            ..print("    [跳过] 系统提示词为空 (insurance)");
+            return false;
+        }
+
+        var ws = ..excel.getSheet(outputWb, _INS_SHEET);
+        var dataArray = ..excel.readRange(ws, _INS_DATA_RANGE);
+        if (!dataArray) {
+            ..print("    [跳过] 数据区域读取失败: " + _INS_DATA_RANGE);
+            return false;
+        }
+
+        var dataPrompt = "以下是两家保险中介类子公司的经营对比数据，请根据系统提示词进行分析，并按指定输出格式给出分析结果。" +
+            '\r\n' + buildInsuranceDataPrompt(dataArray, cfg.targetMonth);
+
+        var apiResponse = ..deepseek_api.CallDeepSeekAPI(
+            dataPrompt, cfg.apiKey, "https://api.deepseek.com", cfg.model,
+            0.3, cfg.sectorMaxTokens, cfg.sectorTimeoutMs,
+            _INS_SHEET, false, 3, systemMsg);
+
+        var analysisResult;
+        if (#apiResponse > 0 && ..string.startsWith(apiResponse, "{")) {
+            analysisResult = ..deepseek_api.ParseAPIResponseSimple(apiResponse);
+        } else {
+            analysisResult = apiResponse;
+        }
+
+        analysisResult = ..deepseek_api.CleanAnalysisResult(analysisResult);
+
+        if (#analysisResult > 0 && !..string.startsWith(analysisResult, "[")) {
+            ..deepseek_api.WriteAnalysisResult(ws, _INS_RESULT_CELL, analysisResult);
+            ..print("    完成");
+            return true;
+        } else {
+            ..print("    [失败] " + analysisResult);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // runHotel -- 酒店业态分析 (三区域合并)
+    // 对应 VBA: 业态分析整合版.bas 运行酒店业态分析 (Lines 126-161)
+    // ============================================================
+    runHotel = function(cfg, outputWb) {
+        if (!..excel.sheetExists(outputWb, _HTL_SHEET)) {
+            ..print("    [跳过] 未找到 '" + _HTL_SHEET + "' Sheet");
+            return false;
+        }
+
+        var systemMsg = cfg.prompts.hotel;
+        if (#systemMsg == 0) {
+            ..print("    [跳过] 系统提示词为空 (hotel)");
+            return false;
+        }
+
+        var ws = ..excel.getSheet(outputWb, _HTL_SHEET);
+        var dataMarketing = ..excel.readRange(ws, _HTL_RANGE_MARKETING);
+        var dataOTA = ..excel.readRange(ws, _HTL_RANGE_OTA);
+        var dataOcc = ..excel.readRange(ws, _HTL_RANGE_OCC);
+
+        if (!dataMarketing || !dataOTA || !dataOcc) {
+            ..print("    [跳过] 数据区域读取失败");
+            return false;
+        }
+
+        var dataPrompt = "以下是两家酒店子公司的经营数据，包含三个独立区域：" +
+            '\r\n\r\n【区域一：营销活动】\r\n' + ..deepseek_api.BuildDataPrompt(dataMarketing) +
+            '\r\n【区域二：OTA网络评价】\r\n' + ..deepseek_api.BuildDataPrompt(dataOTA) +
+            '\r\n【区域三：月均入住率】\r\n' + ..deepseek_api.BuildDataPrompt(dataOcc) +
+            '\r\n请根据系统提示词进行分析，并按指定输出格式给出分析结果。';
+
+        var apiResponse = ..deepseek_api.CallDeepSeekAPI(
+            dataPrompt, cfg.apiKey, "https://api.deepseek.com", cfg.model,
+            0.3, cfg.sectorMaxTokens, cfg.sectorTimeoutMs,
+            _HTL_SHEET, false, 3, systemMsg);
+
+        var analysisResult;
+        if (#apiResponse > 0 && ..string.startsWith(apiResponse, "{")) {
+            analysisResult = ..deepseek_api.ParseAPIResponseSimple(apiResponse);
+        } else {
+            analysisResult = apiResponse;
+        }
+
+        analysisResult = ..deepseek_api.CleanAnalysisResult(analysisResult);
+
+        if (#analysisResult > 0 && !..string.startsWith(analysisResult, "[")) {
+            ..deepseek_api.WriteAnalysisResult(ws, _HTL_RESULT_CELL, analysisResult);
+            ..print("    完成");
+            return true;
+        } else {
+            ..print("    [失败] " + analysisResult);
+            return false;
+        }
+    }
+
+    // ============================================================
+    // buildInsuranceDataPrompt -- 保险数据提示词 (过滤未来月份)
+    // 对应 VBA: 业态分析整合版.bas BuildInsuranceDataPrompt (Lines 167-189)
+    // 逻辑: 扫描A列找到"规模保费"进入区段, 后续行按月份标签过滤,
+    //       遇到"项目"退出区段, 其余行正常输出
+    // ============================================================
+    buildInsuranceDataPrompt = function(dataArray, currentMonth) {
+        if (!dataArray || #dataArray == 0) return "数据无效";
+
+        // 确定列数
+        var colCount = 0;
+        for (i = 1; #dataArray; 1) {
+            var row = dataArray[i];
+            if (row) {
+                var n = 0;
+                for (k in row) n = n + 1;
+                if (n > colCount) colCount = n;
+            }
+        }
+
+        var prompt = "数据表格如下：" + '\r\n';
+        var inScaleSection = false;
+
+        for (i = 1; #dataArray; 1) {
+            var row = dataArray[i];
+
+            // 检测区段标记 (A列)
+            var aVal = "";
+            if (row && row[1] != null) aVal = ..string.trim(tostring(row[1]));
+
+            if (aVal == "规模保费") {
+                inScaleSection = true;
+            } else if (aVal == "项目") {
+                inScaleSection = false;
+            }
+
+            // 在规模保费区段内, 检查月份过滤（跳过未来月份）
+            if (inScaleSection && i > 2) {
+                var monthNum = ..common.ParseMonthLabel(aVal);
+                if (monthNum > currentMonth) {
+                    continue; // 跳过未来月份的数据
+                }
+            }
+
+            // 输出正常行
+            var rowText = "";
+            for (j = 1; colCount; 1) {
+                var val = null;
+                if (row) val = row[j];
+                if (val != null) {
+                    rowText = rowText + " " + tostring(val) + " ";
+                } else {
+                    rowText = rowText + " ";
+                }
+            }
+            prompt = prompt + rowText + '\r\n';
+        }
+
+        return prompt;
+    }
+}

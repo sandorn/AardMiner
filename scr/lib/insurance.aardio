@@ -1,0 +1,329 @@
+// insurance.aardio -- 保险业态数据汇总
+
+// 对应 VBA: 保险数据汇总.bas
+
+// 功能: 从 活动量/{公司}.xlsx "保险类" Sheet 汇总 2 家公司
+//       写入输出文件 "保险类" Sheet C2:D18 + G13:H24
+// 入口: insurance.run(cfg, outputWb)
+
+namespace insurance {
+
+    var _sourceFolder = "";
+
+    var _outputWb = null;
+
+    _INS_SOURCE_SHEET = "保险类";
+
+    _INS_TARGET_SHEET = "保险类";
+
+    // 源行号常量
+
+    var ROW_BASE_HR = 4;        // 期初人力
+
+    var ROW_HR_IN = 5;          // 当月入职
+
+    var ROW_HR_OUT = 6;         // 当月离职
+
+    var ROW_OPEN_COUNT = 10;    // 开单人数
+
+    var ROW_NEW_PREMIUM = 12;   // 承保新单规模保费
+
+    var ROW_QJ_PREMIUM = 13;    // 承保期交规模保费
+
+    var ROW_AR_13 = 14;         // 应收13月续期保费
+
+    var ROW_RC_13 = 15;         // 实收13月续期保费
+
+    var ROW_AR_25 = 16;         // 应收25月续期保费
+
+    var ROW_RC_25 = 17;         // 实收25月续期保费
+
+    var ROW_POLICIES = 18;      // 承保件数
+
+    // 公司配置: {名称, 目标列, 月度保费目标列}
+
+    var _companies = {
+
+        {name="盛唐融信", targetCol=3, monthlyCol=7},   // C列, G列
+
+        {name="君康经纪",  targetCol=4, monthlyCol=8}    // D列, H列
+
+    };
+
+    // 月度规模保费起始行
+
+    var MONTHLY_START_ROW = 13;  // 行13=1月
+
+    // ---- 必须在 run 之前定义 ----
+
+    var _processCompany = function(comp, wsTarget, numMonths) {
+
+        var sourceFile = ..io.joinpath(_sourceFolder, comp.name + ".xlsx");
+
+        if (!..io.exist(sourceFile)) {
+
+            ..print("    [跳过] 源文件不存在: " + comp.name + ".xlsx");
+
+            return false;
+
+        }
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+
+        if (!srcWb) return false;
+
+        if (!..excel.sheetExists(srcWb, _INS_SOURCE_SHEET)) {
+
+            ..print("    [跳过] 未找到 '" + _INS_SOURCE_SHEET + "' Sheet");
+
+            ..excel.closeWorkbook(srcWb);
+
+            return false;
+
+        }
+
+        var ws = ..excel.getSheet(srcWb, _INS_SOURCE_SHEET);
+
+        var tc = comp.targetCol;
+
+        var mc = comp.monthlyCol;
+
+        // ---- 人力部分 ----
+
+        // 期初人力 = 1月达成(D4)
+
+        var baseHR = ..common.SafeRead(ws, ROW_BASE_HR, 4);
+
+        // 入职/离职 YTD
+
+        var ytdHRIn = ..common.SumAchievementCols(ws, ROW_HR_IN, numMonths);
+
+        var ytdHROut = ..common.SumAchievementCols(ws, ROW_HR_OUT, numMonths);
+
+        // 当月净增
+
+        var netAdd = ytdHRIn - ytdHROut;
+
+        // 月末人力
+
+        var endHR = baseHR + ytdHRIn - ytdHROut;
+
+        // 平均人力: 逐月累加计算
+
+        var cumIn = 0.0;
+
+        var cumOut = 0.0;
+
+        var monthlyEndHR = 0.0;
+
+        for (m = 1; numMonths; 1) {
+
+            var col = 2 * m + 2;
+
+            cumIn = cumIn + ..common.SafeRead(ws, ROW_HR_IN, col);
+
+            cumOut = cumOut + ..common.SafeRead(ws, ROW_HR_OUT, col);
+
+            monthlyEndHR = monthlyEndHR + (baseHR + cumIn - cumOut);
+
+        }
+
+        var avgHR = monthlyEndHR / numMonths;
+
+        // 开单人数 YTD
+
+        var ytdOpenCount = ..common.SumAchievementCols(ws, ROW_OPEN_COUNT, numMonths);
+
+        // 报告月达成列
+
+        var lastCol = 2 * numMonths + 2;
+
+        // ---- 写入目标 (WriteValue: 强制写数值) ----
+
+        ..excel.writeCell(wsTarget, 2, tc, baseHR);           // 期初人力
+
+        ..excel.writeCell(wsTarget, 3, tc, ytdHRIn);          // 当月入职
+
+        ..excel.writeCell(wsTarget, 4, tc, ytdHROut);         // 当月离职
+
+        ..excel.writeCell(wsTarget, 5, tc, netAdd);            // 当月净增
+
+        ..excel.writeCell(wsTarget, 6, tc, endHR);             // 月末人力
+
+        ..excel.writeCell(wsTarget, 7, tc, avgHR);             // 平均人力
+
+        ..excel.writeCell(wsTarget, 8, tc, ytdOpenCount);      // 开单人数 YTD
+
+        // Row 10: 承保新单规模保费 YTD
+
+        var ytdNewPremium = ..common.SumAchievementCols(ws, ROW_NEW_PREMIUM, numMonths);
+
+        ..excel.writeCell(wsTarget, 10, tc, ytdNewPremium);
+
+        // Row 11: 承保期交规模保费 YTD
+
+        var ytdQJPremium = ..common.SumAchievementCols(ws, ROW_QJ_PREMIUM, numMonths);
+
+        ..excel.writeCell(wsTarget, 11, tc, ytdQJPremium);
+
+        // Row 12-15: 续期保费 (WriteCell: 保留空值语义)
+
+        // 应收13月
+
+        var v = ..excel.readCell(ws, ROW_AR_13, lastCol);
+
+        ..excel.writeCellRaw(wsTarget, 12, tc, v);
+
+        // 实收13月
+
+        v = ..excel.readCell(ws, ROW_RC_13, lastCol);
+
+        ..excel.writeCellRaw(wsTarget, 13, tc, v);
+
+        // 应收25月
+
+        v = ..excel.readCell(ws, ROW_AR_25, lastCol);
+
+        ..excel.writeCellRaw(wsTarget, 14, tc, v);
+
+        // 实收25月
+
+        v = ..excel.readCell(ws, ROW_RC_25, lastCol);
+
+        ..excel.writeCellRaw(wsTarget, 15, tc, v);
+
+        // Row 16: 承保件数 YTD
+
+        var ytdPolicies = ..common.SumAchievementCols(ws, ROW_POLICIES, numMonths);
+
+        ..excel.writeCell(wsTarget, 16, tc, ytdPolicies);
+
+        // ---- 月度规模保费 G/H列 (行13=1月..行24=12月) ----
+
+        for (mth = 1; 12; 1) {
+
+            var targetRow = MONTHLY_START_ROW + mth - 1;
+
+            if (mth <= numMonths) {
+
+                var premiumCol = 2 * mth + 2;
+
+                v = ..excel.readCell(ws, ROW_NEW_PREMIUM, premiumCol);
+
+                ..excel.writeCellRaw(wsTarget, targetRow, mc, v);
+
+            } else {
+
+                ..excel.writeNA(wsTarget, targetRow, mc);
+
+            }
+
+        }
+
+        ..excel.closeWorkbook(srcWb);
+
+        return true;
+
+    }
+
+    var _writeFormulas = function(wsTarget) {
+
+        // C=3, D=4
+
+        for (col = 3; 4; 1) {
+
+            var letter = ..common.ColLetter(col);
+
+            // Row 9: 活动率 = 开单人数/平均人力 = col8/col7
+
+            ..excel.writeFormula(wsTarget, 9, col,
+
+                "=" + letter + "8/" + letter + "7");
+
+            // Row 17: 件均保费 = 承保新单/件数 = col10/col16
+
+            ..excel.writeFormula(wsTarget, 17, col,
+
+                "=" + letter + "10/" + letter + "16");
+
+            // Row 18: 人均保费 = 承保新单/月末人力 = col10/col6
+
+            ..excel.writeFormula(wsTarget, 18, col,
+
+                "=" + letter + "10/" + letter + "6");
+
+        }
+
+        // 格式设置
+
+        ..excel.setNumberFormat(wsTarget, "C9:D9", "0.00%");
+
+        ..excel.setNumberFormat(wsTarget, "C10:D11", "#,##0.00");
+
+        ..excel.setNumberFormat(wsTarget, "C12:D18", "#,##0.00");
+
+    }
+
+    run = function(cfg, outputWb) {
+
+        ..print("=== 保险数据汇总 ===");
+
+        _sourceFolder = ..io.joinpath(cfg.sourcePath, "活动量");
+
+        _outputWb = outputWb;
+
+        if (!..io.exist(_sourceFolder)) {
+
+            ..print("错误: 活动量文件夹不存在: " + _sourceFolder);
+
+            return 0;
+
+        }
+
+        if (!..excel.sheetExists(outputWb, _INS_TARGET_SHEET)) {
+
+            ..print("错误: 输出文件中未找到 '" + _INS_TARGET_SHEET + "' Sheet");
+
+            return 0;
+
+        }
+
+        var numMonths = cfg.targetMonth;
+
+        if (numMonths < 1 || numMonths > 12) {
+
+            ..print("错误: 无效的报告月份: " + tostring(numMonths));
+
+            return 0;
+
+        }
+
+        var wsTarget = ..excel.getSheet(outputWb, _INS_TARGET_SHEET);
+
+        var processedCount = 0;
+
+        for (i = 1; #_companies; 1) {
+
+            var comp = _companies[i];
+
+            ..print("  [" + tostring(i) + "/" + tostring(#_companies) + "] " + comp.name + " ...");
+
+            if (_processCompany(comp, wsTarget, numMonths)) {
+
+                processedCount = processedCount + 1;
+
+            }
+
+        }
+
+        // 写入公式和格式
+
+        _writeFormulas(wsTarget);
+
+        ..print("保险数据汇总完成: " + tostring(processedCount) + "/" + tostring(#_companies));
+
+        return processedCount;
+
+    }
+
+}

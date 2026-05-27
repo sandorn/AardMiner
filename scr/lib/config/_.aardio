@@ -1,0 +1,203 @@
+// config.aardio -- 配置加载模块
+namespace config {
+
+    import JSON;
+
+    loadProjectConfig = function(configPath) {
+        var cfg = ..models.AppConfig();
+        if (!..io.exist(configPath)) {
+            ..print("警告: 未找到 project.toml，使用默认配置");
+            return cfg;
+        }
+        var content = ..string.load(configPath);
+        var lines = ..string.split(content, '\n');
+        var section = "";
+
+        for (i = 1; #lines; 1) {
+            var line = ..string.trim(lines[i]);
+            if (#line == 0 || ..string.startsWith(line, "#")) continue;
+
+            if (..string.startsWith(line, "[") && ..string.endsWith(line, "]")) {
+                section = ..string.slice(line, 2, -2);
+                continue;
+            }
+
+            var eqPos = ..string.indexOf(line, "=");
+            if (!eqPos) continue;
+
+            var key = ..string.trim(..string.slice(line, 1, eqPos - 1));
+            var val = ..string.trim(..string.slice(line, eqPos + 1));
+            if (..string.startsWith(val, '"') && ..string.endsWith(val, '"')) {
+                val = ..string.slice(val, 2, -2);
+            }
+
+            select(section) {
+                case "data" {
+                    select(key) {
+                        case "source_path" { cfg.sourcePath = val; }
+                        case "output_file" { cfg.outputPath = val; }
+                    }
+                }
+                case "report" {
+                    select(key) {
+                        case "target_month" { cfg.targetMonth = tonumber(val); }
+                        case "target_year" { cfg.targetYear = tonumber(val); }
+                    }
+                }
+                case "analysis" {
+                    select(key) {
+                        case "model" { cfg.model = val; }
+                        case "sector_timeout_ms" { cfg.sectorTimeoutMs = tonumber(val); }
+                        case "sector_max_tokens" { cfg.sectorMaxTokens = tonumber(val); }
+                        case "company_timeout_ms" { cfg.companyTimeoutMs = tonumber(val); }
+                        case "company_max_tokens" { cfg.companyMaxTokens = tonumber(val); }
+                        case "company_max_retries" { cfg.companyMaxRetries = tonumber(val); }
+                        case "company_batch_size" { cfg.companyBatchSize = tonumber(val); }
+                        case "company_batch_delay_ms" { cfg.companyBatchDelayMs = tonumber(val); }
+                        case "quality_score_threshold" { cfg.qualityThreshold = tonumber(val); }
+                    }
+                }
+            }
+        }
+
+        return cfg;
+    }
+
+    loadCompanies = function(cfg) {
+        var jsonPath = ..io.fullpath("/resources/companies.json");
+        if (!..io.exist(jsonPath)) {
+            jsonPath = "resources\\companies.json";
+        }
+        if (!..io.exist(jsonPath)) {
+            ..print("警告: 未找到 companies.json，使用内置默认配置");
+            return loadDefaultCompanies(cfg);
+        }
+        var text = ..string.load(jsonPath);
+        var data = ..JSON.parse(text);
+
+        if (data.insurance) {
+            for (i = 1; #data.insurance; 1) {
+                var c = ..models.Company(data.insurance[i].name, "insurance");
+                ..table.push(cfg.insuranceCompanies, c);
+                ..table.push(cfg.allCompanies, c);
+            }
+        }
+        if (data.commercial) {
+            for (i = 1; #data.commercial; 1) {
+                var c = ..models.Company(data.commercial[i].name, "commercial");
+                ..table.push(cfg.commercialCompanies, c);
+                ..table.push(cfg.allCompanies, c);
+            }
+        }
+        if (data.hotel) {
+            for (i = 1; #data.hotel; 1) {
+                var isBhrt = data.hotel[i].is_bhrt == true;
+                var c = ..models.Company(data.hotel[i].name, "hotel", isBhrt);
+                ..table.push(cfg.hotelCompanies, c);
+                ..table.push(cfg.allCompanies, c);
+            }
+        }
+    }
+
+    loadDefaultCompanies = function(cfg) {
+        var list = {{name="盛唐融信"}, {name="君康经纪"}};
+        for (i = 1; #list; 1) {
+            var c = ..models.Company(list[i].name, "insurance");
+            ..table.push(cfg.insuranceCompanies, c);
+            ..table.push(cfg.allCompanies, c);
+        }
+        list = {{name="北京中言"}, {name="大连凯丹"}, {name="福建钱隆"}, {name="春夏秋冬"}, {name="重庆宜新"}};
+        for (i = 1; #list; 1) {
+            var c = ..models.Company(list[i].name, "commercial");
+            ..table.push(cfg.commercialCompanies, c);
+            ..table.push(cfg.allCompanies, c);
+        }
+        var hotelList = {{name="伯豪瑞廷", isBhrt=true}, {name="重庆瑞尔", isBhrt=false}};
+        for (i = 1; #hotelList; 1) {
+            var c = ..models.Company(hotelList[i].name, "hotel", hotelList[i].isBhrt);
+            ..table.push(cfg.hotelCompanies, c);
+            ..table.push(cfg.allCompanies, c);
+        }
+    }
+
+    loadApiKey = function() {
+        var userProfile = ..string.getenv("USERPROFILE");
+        var keyPath = userProfile ++ "\\.dskey";
+        if (!..io.exist(keyPath)) {
+            ..print("警告: 未找到 .dskey 文件: " + keyPath);
+            return "";
+        }
+        var content = ..string.load(keyPath);
+        var lines = ..string.split(content, '\n');
+        for (i = 1; #lines; 1) {
+            var line = ..string.trim(lines[i]);
+            if (#line == 0 || ..string.startsWith(line, "#")) continue;
+
+            var pos = ..string.indexOf(line, "EXCEL=");
+            if (pos == 1) return ..string.slice(line, 7);
+            var lower = ..string.lower(line);
+            if (..string.startsWith(lower, "excel=")) return ..string.slice(line, 7);
+        }
+        ..print("警告: .dskey 中未找到 EXCEL= 段");
+        return "";
+    }
+
+    loadPrompts = function(cfg) {
+        cfg.prompts = {};
+        var promptDir = ..io.fullpath("/resources/prompts");
+        var promptFiles = {
+            insurance = "保险分析.md",
+            commercial = "商写分析.md",
+            hotel = "酒店分析.md",
+            financial = "经营分析.md"
+        };
+        for (k, v in promptFiles) {
+            var fpath = promptDir ++ "\\" + v;
+            if (..io.exist(fpath)) {
+                cfg.prompts[k] = ..string.load(fpath);
+            } else {
+                ..print("警告: 未找到提示词文件: " + fpath);
+                cfg.prompts[k] = "";
+            }
+        }
+    }
+
+    loadAll = function(configPath = "project.toml") {
+        var cfg = loadProjectConfig(configPath);
+        loadCompanies(cfg);
+        cfg.apiKey = loadApiKey();
+        loadPrompts(cfg);
+        return cfg;
+    }
+
+    saveProjectConfig = function(cfg, configPath) {
+        var lines = {};
+        ..table.push(lines, "# AardMiner 项目配置文件");
+        ..table.push(lines, "# 每次运行前编辑此文件，指定数据源和输出参数");
+        ..table.push(lines, "");
+        ..table.push(lines, "[data]");
+        ..table.push(lines, 'source_path = "' + cfg.sourcePath + '"');
+        ..table.push(lines, 'output_file = "' + cfg.outputPath + '"');
+        ..table.push(lines, "");
+        ..table.push(lines, "[report]");
+        ..table.push(lines, "# 0=自动检测（输出文件填写页A2/A4 → 文件夹名 → 系统日期）");
+        ..table.push(lines, "target_month = " + tostring(cfg.targetMonth));
+        ..table.push(lines, "target_year = " + tostring(cfg.targetYear));
+        ..table.push(lines, "");
+        ..table.push(lines, "[analysis]");
+        ..table.push(lines, 'model = "' + cfg.model + '"');
+        ..table.push(lines, "sector_timeout_ms = " + tostring(cfg.sectorTimeoutMs));
+        ..table.push(lines, "sector_max_tokens = " + tostring(cfg.sectorMaxTokens));
+        ..table.push(lines, "company_timeout_ms = " + tostring(cfg.companyTimeoutMs));
+        ..table.push(lines, "company_max_tokens = " + tostring(cfg.companyMaxTokens));
+        ..table.push(lines, "company_max_retries = " + tostring(cfg.companyMaxRetries));
+        ..table.push(lines, "company_batch_size = " + tostring(cfg.companyBatchSize));
+        ..table.push(lines, "company_batch_delay_ms = " + tostring(cfg.companyBatchDelayMs));
+        ..table.push(lines, "quality_score_threshold = " + tostring(cfg.qualityThreshold));
+        ..table.push(lines, "");
+
+        var content = ..string.join(lines, '\r\n');
+        ..string.save(configPath, content);
+        return true;
+    }
+}

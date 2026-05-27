@@ -1,0 +1,245 @@
+// company_analysis.aardio -- 子公司核心指标分析
+// 对应 VBA: 核心指标分析.bas
+// 功能: 对每家公司读取填写页配置, 构建数据提示词, 调用 DeepSeek API,
+//       质量检查 + 自动重试, 写入分析结果
+// 入口: company_analysis.runAll(cfg, outputWb)
+
+namespace company_analysis {
+
+    // ---- 工作表数据范围常量 ----
+    _DATA_RANGE = "C1:R5";
+    _RESULT_CELL = "C61";
+    _CONFIG_SHEET = "填写页";
+    _TARGET_RANGE = "C2:C10";
+    _MONTH_NUMBER_CELL = "A2";
+    _YEAR_CELL = "A4";
+    _PROGRESS_CELL = "A8";
+    _SYSTEM_PROMPT_CELL = "C20";
+
+    // ---- 重试与限流配置 ----
+    _MAX_RETRIES = 2;
+    _RETRY_DELAY_MS = 2000;
+    _BATCH_SIZE = 3;
+    _BATCH_DELAY_MS = 1000;
+    _TEMPERATURE = 0.3;
+
+    // ============================================================
+    // MonthNumberToText -- 月份数字转文本
+    // ============================================================
+    MonthNumberToText = function(monthNumber) {
+        if (monthNumber < 1 || monthNumber > 12) return "";
+        return tostring(monthNumber) + "月";
+    }
+
+    // ============================================================
+    // CheckAnalysisQuality -- 分析结果质量检查
+    // 对应 VBA: CheckAnalysisQuality
+    // ============================================================
+    CheckAnalysisQuality = function(analysisResult) {
+        var quality = {
+            companyName = "";
+            hasSummary = false;
+            hasRevenue = false;
+            hasEbitda = false;
+            hasCashFlow = false;
+            hasExpense = false;
+            totalLines = 0;
+            score = 0
+        };
+
+        if (#analysisResult == 0) return quality;
+
+        var lines = ..string.split(analysisResult, '\r\n');
+        quality.totalLines = #lines;
+
+        for (i = 1; #lines; 1) {
+            var line = ..string.trim(lines[i]);
+            if (#line == 0) continue;
+
+            if (!quality.hasSummary) {
+                if (!..string.indexOf(line, "营业收入") &&
+                    !..string.indexOf(line, "EBITDA") &&
+                    !..string.indexOf(line, "扣非") &&
+                    !..string.indexOf(line, "经营活动") &&
+                    !..string.indexOf(line, "经营支出")) {
+                    quality.hasSummary = true;
+                }
+            }
+            if (..string.indexOf(line, "营业收入")) quality.hasRevenue = true;
+            if (..string.indexOf(line, "EBITDA") || ..string.indexOf(line, "扣非利润")) quality.hasEbitda = true;
+            if (..string.indexOf(line, "经营活动净现金流") || ..string.indexOf(line, "现金流")) quality.hasCashFlow = true;
+            if (..string.indexOf(line, "经营支出")) quality.hasExpense = true;
+        }
+
+        if (quality.hasSummary) quality.score = quality.score + 2;
+        if (quality.hasRevenue) quality.score = quality.score + 2;
+        if (quality.hasEbitda) quality.score = quality.score + 2;
+        if (quality.hasCashFlow) quality.score = quality.score + 2;
+        if (quality.hasExpense) quality.score = quality.score + 2;
+
+        return quality;
+    }
+
+    // ============================================================
+    // AnalyzeWithQualityCheck -- 带质量检查的分析（含重试）
+    // 对应 VBA: AnalyzeWithQualityCheck
+    // ============================================================
+    AnalyzeWithQualityCheck = function(companyName, dataPrompt, apiKey, systemMsg, model) {
+        var analysisResult = "";
+
+        for (retryCount = 0; _MAX_RETRIES + 1; 1) {
+            var apiResponse = ..deepseek_api.CallDeepSeekAPI(
+                dataPrompt, apiKey,
+                "https://api.deepseek.com",
+                model,
+                _TEMPERATURE,
+                1500,  // maxTokens
+                60000, // timeoutMs
+                companyName,
+                false, // debugMode
+                1,     // maxRetries (no nested retry)
+                systemMsg
+            );
+
+            if (..string.startsWith(apiResponse, "{")) {
+                analysisResult = ..deepseek_api.ParseAPIResponseSimple(apiResponse);
+            } else {
+                analysisResult = apiResponse;
+            }
+
+            analysisResult = ..deepseek_api.CleanAnalysisResult(analysisResult);
+            var quality = CheckAnalysisQuality(analysisResult);
+
+            if (quality.score >= 8 || retryCount >= _MAX_RETRIES) {
+                if (quality.score < 8) {
+                    analysisResult = analysisResult + '\r\n\r\n' +
+                        "[质量提示：本分析质量评分 " + tostring(quality.score) + "/10，部分指标描述可能不完整]";
+                }
+                return analysisResult;
+            }
+
+            sleep(_RETRY_DELAY_MS);
+        }
+
+        return analysisResult;
+    }
+
+    // ============================================================
+    // GetMonthNumberFromConfig -- 从配置获取月份
+    // ============================================================
+    GetMonthNumberFromConfig = function(cfg) {
+        if (cfg.targetMonth && cfg.targetMonth >= 1 && cfg.targetMonth <= 12) {
+            return cfg.targetMonth;
+        }
+        return 0;
+    }
+
+    // ============================================================
+    // GetAnalysisYear -- 获取分析年份
+    // ============================================================
+    GetAnalysisYear = function(cfg) {
+        if (cfg.targetYear) return tostring(cfg.targetYear);
+        return tostring(..time().year);
+    }
+
+    // ============================================================
+    // GetProgressFromConfig -- 获取序时进度
+    // ============================================================
+    GetProgressFromConfig = function(cfg) {
+        var monthNum = GetMonthNumberFromConfig(cfg);
+        if (monthNum >= 1 && monthNum <= 12) {
+            return (monthNum / 12.0) * 100.0;
+        }
+        return 0.0;
+    }
+
+    // ============================================================
+    // AnalyzeCompany -- 分析单个公司
+    // 对应 VBA: AnalyzeCompany
+    // ============================================================
+    AnalyzeCompany = function(companyName, outputWb, apiKey, systemMsg, cfg) {
+        if (!..excel.sheetExists(outputWb, companyName)) {
+            ..print("  未找到工作表: " + companyName);
+            return false;
+        }
+
+        var ws = outputWb.Worksheets(companyName);
+        var wsData = ws.Range(_DATA_RANGE).Value;
+
+        var monthNum = GetMonthNumberFromConfig(cfg);
+        var monthText = MonthNumberToText(monthNum);
+        if (#monthText == 0) monthText = "未知";
+
+        var yearText = GetAnalysisYear(cfg);
+        var progressPercent = GetProgressFromConfig(cfg);
+
+        var dataPrompt = "公司名称：" + companyName + '\r\n' +
+            "年份：" + yearText + '\r\n' +
+            "当前月份：" + monthText + '\r\n' +
+            "序时进度：" + ..string.format("%.2f", progressPercent) + "%" + '\r\n' +
+            "数据单位：万元" + '\r\n' +
+            "请按系统提示词要求输出指定格式。" + '\r\n' +
+            ..deepseek_api.BuildDataPrompt(wsData);
+
+        var analysisResult = AnalyzeWithQualityCheck(companyName, dataPrompt, apiKey, systemMsg, cfg.model);
+
+        if (#analysisResult > 0) {
+            ..deepseek_api.WriteAnalysisResult(ws, _RESULT_CELL, analysisResult);
+            var quality = CheckAnalysisQuality(analysisResult);
+            ..print("  " + companyName + " - 分析完成，质量评分: " + tostring(quality.score) + "/10");
+            return true;
+        }
+
+        ..print("  " + companyName + " - 分析结果为空");
+        return false;
+    }
+
+    // ============================================================
+    // runAll -- 运行所有公司分析（入口函数）
+    // 对应 VBA: 多轮经营分析
+    // ============================================================
+    runAll = function(cfg, outputWb) {
+        ..print("=== 子公司经营分析 ===");
+
+        if (#cfg.apiKey == 0) {
+            ..print("错误: 未配置 API Key，跳过公司分析");
+            return 0;
+        }
+
+        var systemMsg = cfg.prompts && cfg.prompts.financial ? cfg.prompts.financial : "";
+        if (#systemMsg == 0) {
+            ..print("错误: 未配置系统提示词（financial），跳过公司分析");
+            return 0;
+        }
+
+        var companies = cfg.allCompanies;
+        if (!companies || #companies == 0) {
+            ..print("错误: 未找到待分析的公司");
+            return 0;
+        }
+
+        var totalCount = #companies;
+        var processedCount = 0;
+        var batchCount = 0;
+
+        for (i = 1; totalCount; 1) {
+            var company = companies[i];
+            var companyName = company.name;
+
+            batchCount = batchCount + 1;
+            ..print("  正在分析: " + companyName + " (" + tostring(i) + "/" + tostring(totalCount) + ")");
+
+            if (AnalyzeCompany(companyName, outputWb, cfg.apiKey, systemMsg, cfg)) {
+                processedCount = processedCount + 1;
+            }
+
+            if (batchCount % _BATCH_SIZE == 0 && i < totalCount) {
+                ..print("  批次完成，等待 " + tostring(_BATCH_DELAY_MS) + "ms ...");
+                sleep(_BATCH_DELAY_MS);
+            }
+        }
+
+        ..print("公司分析完成: " + tostring(processedCount) + "/" + tostring(totalCount));
+        return processedCount;
+    }
+}

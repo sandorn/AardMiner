@@ -1,0 +1,305 @@
+// common.aardio -- 公共工具函数
+// 对应 VBA: 汇总公共模块.bas + 酒店数据汇总.bas ExtractNumberFromCell
+// 提供数字提取、YTD求和、列号转换、日期解析
+
+namespace common {
+
+    // ============================================================
+    // ParseNumeric -- 从 Variant 提取数字
+    // 对应 VBA: 汇总公共模块.bas Lines 93-121
+    // 优先级: Empty→0, 数值→CDbl, 文本→tonumber或ExtractSingleNumber
+    // ============================================================
+    ParseNumeric = function(v) {
+        if (v == null) return 0.0;
+
+        var vtype = type(v);
+        if (vtype == type.number) return v;
+
+        var s = tostring(v);
+        if (#s == 0) return 0.0;
+
+        // 去除千分位逗号和空格后再尝试转数字
+        var clean = ..string.replace(..string.replace(s, ",", ""), " ", "");
+        var n = tonumber(clean);
+        if (n != null) return n;
+
+        return ExtractSingleNumber(s);
+    }
+
+    // ============================================================
+    // ExtractSingleNumber -- 从字符串提取首个连续数字
+    // 对应 VBA: 酒店数据汇总.bas Lines 219-250
+    // 注意: aardio s[i] 返回 byte 值(number), 不能用 '0' (string) 比较
+    //       必须使用数值 48-57 (ASCII '0'-'9'), 46='.', 44=','
+    // 增强: 跳过千分位逗号, 使用数组拼接避免 + 运算符类型转换导致 numStr 变为 number
+    // ============================================================
+    ExtractSingleNumber = function(text) {
+        var s = tostring(text);
+        if (#s == 0) return 0.0;
+
+        // 先尝试整体转数字 (匹配 VBA IsNumeric)
+        // 预处理: 去除千分位逗号和空格
+        var clean = ..string.replace(..string.replace(s, ",", ""), " ", "");
+        var n = tonumber(clean);
+        if (n != null) return n;
+
+        var digits = {};
+        var foundDigit = false;
+        var foundDot = false;
+
+        for (i = 1; #s; 1) {
+            var b = s[i];  // byte 值
+            if (b >= 48 && b <= 57) {  // '0' ~ '9'
+                ..table.push(digits, ..string.pack(b));
+                foundDigit = true;
+            }
+            else if (b == 46 && foundDigit && !foundDot) {  // '.'
+                ..table.push(digits, ".");
+                foundDot = true;
+            }
+            else if (b == 44 && foundDigit) {  // ',' 千分位分隔符, 跳过
+                // 不做任何操作，继续提取后续数字
+            }
+            else if (foundDigit) {
+                break;
+            }
+        }
+
+        if (#digits > 0) {
+            var numStr = ..string.join(digits, "");
+            n = tonumber(numStr);
+            if (n != null) return n;
+        }
+        return 0.0;
+    }
+
+    // ============================================================
+    // ExtractNumberFromCell -- 增强版数字提取（酒店业态专用）
+    // 对应 VBA: 酒店数据汇总.bas Lines 175-216
+    // 处理: 空值→0, 错误值→0, 数值→直接返回,
+    //       tonumber成功→直接返回, 含"+"→Split求和, 普通文本→ExtractSingleNumber
+    // ============================================================
+    ExtractNumberFromCell = function(cellValue) {
+        if (cellValue == null) return 0.0;
+
+        var vtype = type(cellValue);
+
+        // 数值直接返回
+        if (vtype == type.number) return cellValue;
+
+        // 尝试整体转数字 (匹配 VBA IsNumeric — 处理纯数字文本和COM数值variant)
+        var s = tostring(cellValue);
+        if (#s > 0) {
+            // 去除千分位逗号和空格后再尝试转数字
+            var clean = ..string.replace(..string.replace(s, ",", ""), " ", "");
+            var n = tonumber(clean);
+            if (n != null) return n;
+
+            // 包含 "+" → 分别提取后求和 (如 "1+1000" → 1001)
+            if (..string.indexOf(s, "+")) {
+                var parts = ..string.split(s, "+");
+                var total = 0.0;
+                for (i = 1; #parts; 1) {
+                    total = total + ExtractSingleNumber(parts[i]);
+                }
+                return total;
+            }
+
+            return ExtractSingleNumber(s);
+        }
+
+        return 0.0;
+    }
+
+    // ============================================================
+    // SafeRead -- 安全读取单元格数值
+    // 对应 VBA: 汇总公共模块.bas Line 85
+    // ============================================================
+    SafeRead = function(ws, row, col) {
+        var v = ..excel.readCell(ws, row, col);
+        return ParseNumeric(v);
+    }
+
+    // ============================================================
+    // SumAchievementCols -- YTD 达成列求和
+    // 对应 VBA: 汇总公共模块.bas Lines 127-140
+    // colOffset: 标准=2 (col=2*m+2, D=4起始), 伯豪瑞廷=3 (col=2*m+3, E=5起始)
+    // ============================================================
+    SumAchievementCols = function(ws, sourceRow, numMonths, colOffset = 2) {
+        var total = 0.0;
+        for (m = 1; numMonths; 1) {
+            var col = 2 * m + colOffset;
+            total = total + SafeRead(ws, sourceRow, col);
+        }
+        return total;
+    }
+
+    // ============================================================
+    // ColLetter -- 列号转字母
+    // 对应 VBA: 汇总公共模块.bas Lines 15-17
+    // 3→"C", 27→"AA"
+    // ============================================================
+    ColLetter = function(colNum) {
+        if (colNum < 1) return "";
+        if (colNum <= 26) return ..string.pack(64 + colNum);
+        var hi = ..math.floor((colNum - 1) / 26);
+        var lo = (colNum - 1) % 26 + 1;
+        return ..string.pack(64 + hi) + ..string.pack(64 + lo);
+    }
+
+    // ============================================================
+    // GetTargetMonth -- 获取报告月份（三层回退）
+    // 对应 VBA: 汇总公共模块.bas Lines 22-43
+    // 1. 从输出文件填写页!A2 读取
+    // 2. 从文件夹名解析
+    // 3. 系统当前月份
+    // ============================================================
+    GetTargetMonth = function(wsConfig) {
+        if (wsConfig) {
+            var v = ..excel.readCell(wsConfig, 2, 1);  // A2
+            if (v != null) {
+                var vtype = type(v);
+                if (vtype == type.number) {
+                    var m = ..math.floor(v);
+                    if (m >= 1 && m <= 12) return m;
+                }
+                if (vtype == type.string) {
+                    var s = ..string.trim(v);
+                    var m = tonumber(s);
+                    if (m && m >= 1 && m <= 12) return m;
+                    // 尝试提取数字 ("4月" → 4)
+                    var numStr = "";
+                    for (i = 1; #s; 1) {
+                        var b = s[i];
+                        if (b >= 48 && b <= 57) numStr = numStr + ..string.pack(b);
+                    }
+                    if (#numStr > 0) {
+                        m = tonumber(numStr);
+                        if (m && m >= 1 && m <= 12) return m;
+                    }
+                }
+            }
+        }
+        // 回退到系统月份
+        var now = ..time();
+        return tonumber(tostring(now.month));
+    }
+
+    // ============================================================
+    // GetMonthFromPath -- 从文件夹名解析月份
+    // 对应 VBA: 汇总公共模块.bas Lines 49-80
+    // "2026年4月" → 4
+    // ============================================================
+    GetMonthFromPath = function(dirPath) {
+        // 取最末段文件夹名
+        var parts = ..string.split(dirPath, "\\");
+        var folderName = parts[#parts];
+        if (#folderName == 0) {
+            // 可能是 "/" 分隔
+            parts = ..string.split(dirPath, "/");
+            folderName = parts[#parts];
+        }
+
+        var yearPos = ..string.indexOf(folderName, "年");
+        if (!yearPos) {
+            // 回退到系统月份
+            var now = ..time();
+            return tonumber(tostring(now.month));
+        }
+
+        var monthPos = ..string.indexOf(folderName, "月", yearPos + 1);
+        if (!monthPos) {
+            var now = ..time();
+            return tonumber(tostring(now.month));
+        }
+
+        var monthStr = "";
+        for (i = yearPos + 1; monthPos - 1; 1) {
+            var b = folderName[i];
+            if (b >= 48 && b <= 57) {
+                monthStr = monthStr + ..string.pack(b);
+            }
+        }
+
+        if (#monthStr > 0) {
+            var m = tonumber(monthStr);
+            if (m && m >= 1 && m <= 12) return m;
+        }
+
+        var now = ..time();
+        return tonumber(tostring(now.month));
+    }
+
+    // ============================================================
+    // GetYearFromConfig -- 从填写页!A4 读取年份
+    // 对应 VBA: 核心指标分析.bas GetAnalysisYear Lines 109-132
+    // ============================================================
+    GetYearFromConfig = function(wsConfig) {
+        if (wsConfig) {
+            var v = ..excel.readCell(wsConfig, 4, 1);  // A4
+            if (v != null) {
+                var vtype = type(v);
+                if (vtype == type.number) {
+                    var y = ..math.floor(v);
+                    if (y >= 2000 && y <= 2100) return tostring(y);
+                }
+                if (vtype == type.string) {
+                    var s = ..string.trim(v);
+                    var n = tonumber(s);
+                    if (n != null && n >= 2000 && n <= 2100) return tostring(math.floor(n));
+                    // 提取连续数字
+                    var numStr = "";
+                    for (i = 1; #s; 1) {
+                        var b = s[i];
+                        if (b >= 48 && b <= 57) numStr = numStr + ..string.pack(b);
+                    }
+                    if (#numStr > 0) return numStr;
+                    return s;
+                }
+            }
+        }
+        var now = ..time();
+        return tostring(now.year);
+    }
+
+    // ============================================================
+    // GetProgressFromConfig -- 从填写页!A8 读取序时进度
+    // 对应 VBA: 核心指标分析.bas GetProgressFromConfig Lines 134-177
+    // ============================================================
+    GetProgressFromConfig = function(wsConfig, targetMonth) {
+        if (wsConfig) {
+            var v = ..excel.readCell(wsConfig, 8, 1);  // A8
+            if (v != null) {
+                var vtype = type(v);
+                if (vtype == type.number) {
+                    if (v <= 1.0) return v * 100.0;  // 0.3333 → 33.33
+                    return v;
+                }
+                if (vtype == type.string) {
+                    var s = ..string.replace(..string.trim(v), "%", "");
+                    var n = tonumber(s);
+                    if (n != null) return n;
+                }
+            }
+        }
+        // 回退: month/12 * 100
+        if (targetMonth >= 1 && targetMonth <= 12) {
+            return (targetMonth / 12.0) * 100.0;
+        }
+        return 0.0;
+    }
+
+    // ============================================================
+    // ParseMonthLabel -- 解析月份标签
+    // 对应 VBA: 业态分析整合版.bas ParseMonthLabel Lines 204-210
+    // "1月"→1, "12月"→12
+    // ============================================================
+    ParseMonthLabel = function(label) {
+        var s = ..string.trim(label);
+        if (#s == 0) return 0;
+        s = ..string.replace(s, "月", "");
+        var n = tonumber(s);
+        if (n != null) return n;
+        return 0;
+    }
+}

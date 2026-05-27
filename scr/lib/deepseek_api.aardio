@@ -1,0 +1,200 @@
+// deepseek_api.aardio -- DeepSeek API 客户端
+
+namespace deepseek_api {
+    import JSON;
+    import inet.http;
+
+    _CONTENT_PREFIX = '"content":"';
+    _CONTENT_PREFIX_LEN = 11;
+
+    EscapeJSONString = function(text) {
+        if (#text == 0) return "";
+        var result = "";
+        for (i = 1; #text; 1) {
+            var ch = text[i];
+            if (ch == '\\'#) {
+                result ++= '\\\\';
+            } else if (ch == '"'#) {
+                result ++= '\\"';
+            } else if (ch == '\n'#) {
+                result ++= '\\n';
+            } else if (ch == '\r'#) {
+                result ++= '\\r';
+            } else if (ch == '\t'#) {
+                result ++= '\\t';
+            } else if (ch == '\b'#) {
+                result ++= '\\b';
+            } else if (ch == '\f'#) {
+                result ++= '\\f';
+            } else {
+                result ++= text[[i]];
+            }
+        }
+        return result;
+    }
+
+    ParseAPIResponseSimple = function(apiResponse) {
+        if (#apiResponse == 0) return "API响应为空";
+        var obj = ..JSON.parse(apiResponse);
+        if (obj) {
+            if (obj.error) {
+                var errMsg = obj.error.message;
+                if (#errMsg > 0) return "API错误: " + errMsg;
+            }
+            if (obj.choices && #obj.choices > 0) {
+                var msg = obj.choices[1].message;
+                var content = msg.content;
+                if (#content > 0) return content;
+                // 推理模型（deepseek-reasoner/v4-pro）将输出放在 reasoning_content
+                var reasoning = msg.reasoning_content;
+                if (#reasoning > 0) return reasoning;
+            }
+        }
+        return "未找到content字段";
+    }
+
+    BuildJSONRequest = function(systemMsg, prompt, model, temperature, maxTokens) {
+        var requestData = {
+            model = model;
+            messages = {
+                { role = "system"; content = systemMsg };
+                { role = "user"; content = prompt }
+            };
+            temperature = temperature;
+            max_tokens = maxTokens
+        };
+        return ..JSON.stringify(requestData);
+    }
+
+    CallDeepSeekAPI = function(prompt, apiKey, apiBaseUrl = "https://api.deepseek.com",
+        model = "deepseek-chat", temperature = 0.3, maxTokens = 1000,
+        timeoutMs = 30000, contextName = "", debugMode = false,
+        maxRetries = 3, systemMsg = "") {
+
+        if (#apiKey == 0) {
+            return _formatError(contextName, "配置错误", "未配置 API Key");
+        }
+        if (maxRetries < 1) maxRetries = 1;
+
+        var url = apiBaseUrl + "/chat/completions";
+        var jsonBody = BuildJSONRequest(systemMsg, prompt, model, temperature, maxTokens);
+        if (debugMode) {
+            ..print(_formatLog(contextName, "请求体长度: " + tostring(#jsonBody)));
+        }
+
+        var lastError = "";
+        for (retryCount = 1; maxRetries; 1) {
+            if (debugMode) {
+                ..print(_formatLog(contextName, "发送请求 (重试 #" + tostring(retryCount) + ")"));
+            }
+            var isRetryable = false;
+            var statusCode = 0;
+            var result = "";
+            var http = ..inet.http();
+            http.setTimeouts(timeoutMs, timeoutMs, timeoutMs);
+            http.tempHeaders = 'Content-Type: application/json\r\nAuthorization: Bearer ' + apiKey + '\r\nAccept: application/json';
+            result = http.post(url, jsonBody);
+            statusCode = http.statusCode;
+            if (statusCode == 200 && #result > 0) {
+                if (debugMode) {
+                    ..print(_formatLog(contextName, "API响应成功，长度: " + tostring(#result)));
+                }
+                return result;
+            }
+            lastError = _formatError(contextName, "API错误", tostring(statusCode));
+            isRetryable = _isRetryableStatus(statusCode);
+            if (debugMode && #result > 0) {
+                ..print(_formatLog(contextName, "错误详情: " + ..string.slice(result, 1, 500)));
+            }
+            if (!isRetryable) return lastError;
+            if (retryCount < maxRetries) {
+                var waitSec = 2 ** retryCount;
+                if (debugMode) {
+                    ..print(_formatLog(contextName, "等待 " + tostring(waitSec) + " 秒后重试..."));
+                }
+                sleep(waitSec * 1000);
+            }
+        }
+        return lastError;
+    }
+
+    BuildDataPrompt = function(dataArray) {
+        if (!dataArray || #dataArray == 0) return "数据无效";
+        var colCount = 0;
+        for (i = 1; #dataArray; 1) {
+            var row = dataArray[i];
+            if (row) {
+                var n = 0;
+                for (k in row) n = n + 1;
+                if (n > colCount) colCount = n;
+            }
+        }
+        var prompt = "数据表格如下：" + '\r\n';
+        for (i = 1; #dataArray; 1) {
+            var row = dataArray[i];
+            var rowText = "";
+            for (j = 1; colCount; 1) {
+                var val = null;
+                if (row) val = row[j];
+                if (val != null) {
+                    rowText = rowText + " " + tostring(val) + " ";
+                } else {
+                    rowText = rowText + " ";
+                }
+            }
+            prompt = prompt + rowText + '\r\n';
+        }
+        return prompt;
+    }
+
+    CleanAnalysisResult = function(result) {
+        if (#result == 0) return "";
+        var lines = ..string.split(result, '\r\n');
+        var cleanedLines = {};
+        for (i = 1; #lines; 1) {
+            var line = ..string.trim(lines[i]);
+            if (#line > 0) ..table.push(cleanedLines, line);
+        }
+        if (#cleanedLines == 0) return "";
+        return ..string.join(cleanedLines, '\r\n');
+    }
+
+    WriteAnalysisResult = function(ws, cellAddr, result, debugMode = false, contextName = "") {
+        if (#result > 0) {
+            var range = ws.Range(cellAddr);
+            range.Value = result;
+            range.WrapText = true;
+            range.HorizontalAlignment = -4131;
+            range.VerticalAlignment = -4160;
+            if (debugMode) {
+                ..print(_formatLog(contextName, "分析结果已写入 " + cellAddr));
+            }
+            return true;
+        }
+        if (debugMode) {
+            ..print(_formatLog(contextName, "分析结果为空"));
+        }
+        return false;
+    }
+
+    _isRetryableStatus = function(statusCode) {
+        select(statusCode) {
+            case 401, 402, 403, 422 {
+                return false;
+            }
+            else {
+                return true;
+            }
+        }
+    }
+
+    _formatError = function(context, category, detail) {
+        if (#context > 0) return "[" + context + "] " + category + "：" + detail;
+        return category + "：" + detail;
+    }
+
+    _formatLog = function(context, message) {
+        if (#context > 0) return "[" + context + "] " + message;
+        return message;
+    }
+}

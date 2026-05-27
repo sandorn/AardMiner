@@ -1,0 +1,152 @@
+// excel.aardio -- COM Excel 抽象层
+// 封装所有 Excel COM 操作：创建/打开/读写/粘贴/格式/公式
+
+namespace excel {
+
+    import com;
+
+    app = null;
+    openedWbs = {};
+
+    init = function() {
+        if (app) return true;
+
+        app = ..com.CreateObject("Excel.Application");
+        if (!app) {
+            ..print("错误: 无法创建 Excel.Application，请确认已安装 Office Excel");
+            return false;
+        }
+
+        app.Visible = false;
+        app.DisplayAlerts = false;
+        app.ScreenUpdating = false;
+        app.EnableEvents = false;
+        app.Calculation = -4135;
+
+        openedWbs = {};
+        return true;
+    }
+
+    openWorkbook = function(path, readOnly = true) {
+        if (!app) {
+            if (!init()) return null;
+        }
+
+        // 参数校验：避免传入 null/空字符串导致 COM 异常
+        if (path === null || type(path) != type.string || #path == 0) {
+            ..print("错误: openWorkbook 参数 path 无效 (null 或空字符串)");
+            return null;
+        }
+
+        if (!..io.exist(path)) {
+            ..print("错误: 文件不存在: " + path);
+            return null;
+        }
+
+        var wb = app.Workbooks.Open(path, null, readOnly ? true : false);
+        if (wb) ..table.push(openedWbs, wb);
+        else ..print("错误: 无法打开工作簿: " + path);
+        return wb;
+    }
+
+    getSheet = function(wb, sheetName) {
+        var ws = wb.Worksheets(sheetName);
+        return ws;
+    }
+
+    sheetExists = function(wb, sheetName) {
+        var ws = getSheet(wb, sheetName);
+        return ws != null;
+    }
+
+    readCell = function(ws, row, col) {
+        return ws.Cells(row, col).Value;
+    }
+
+    writeCell = function(ws, row, col, value) {
+        ws.Cells(row, col).Value = value;
+        return true;
+    }
+
+    writeFormula = function(ws, row, col, formula) {
+        ws.Cells(row, col).Formula = formula;
+        return true;
+    }
+
+    writeNA = function(ws, row, col) {
+        ws.Cells(row, col).Formula = "=NA()";
+        return true;
+    }
+
+    writeCellRaw = function(ws, row, col, value) {
+        if (value == null) {
+            ws.Cells(row, col).Value = "";
+        } else {
+            ws.Cells(row, col).Value = value;
+        }
+        return true;
+    }
+
+    readRange = function(ws, rangeAddr) {
+        return ws.Range(rangeAddr).Value;
+    }
+
+    writeRange = function(ws, rangeAddr, dataArray) {
+        ws.Range(rangeAddr).Value = dataArray;
+        return true;
+    }
+
+    copyRangeValues = function(srcWs, srcRange, dstWs, dstRange) {
+        srcWs.Range(srcRange).Copy();
+        dstWs.Range(dstRange).PasteSpecial(-4163);
+        app.CutCopyMode = false;
+        return true;
+    }
+
+    setNumberFormat = function(ws, rangeAddr, format) {
+        ws.Range(rangeAddr).NumberFormat = format;
+        return true;
+    }
+
+    closeWorkbook = function(wb) {
+        if (!wb) return;
+        wb.Close(false);
+        
+        // 从跟踪列表中移除
+        for (i = 1; #openedWbs; 1) {
+            if (openedWbs[i] == wb) {
+                ..table.remove(openedWbs, i);
+                break;
+            }
+        }
+    }
+
+    saveWorkbook = function(wb) {
+        if (!wb) return false;
+        wb.Save();
+        return true;
+    }
+
+    close = function() {
+        // 关闭所有已打开的工作簿（逆序关闭避免索引问题）
+        for (i = #openedWbs; 1; -1) {
+            var wb = openedWbs[i];
+            if (wb) wb.Close(false);
+        }
+        openedWbs = {};
+
+        // 退出 Excel 应用程序
+        if (app) {
+            app.Quit();
+            app = null;
+        }
+    }
+
+    colLetter = function(colNum) {
+        if (colNum < 1) return "";
+        if (colNum <= 26) return ..string.pack(64 + colNum);
+        var hi = ..math.floor((colNum - 1) / 26);
+        var lo = (colNum - 1) % 26 + 1;
+        return ..string.pack(64 + hi) + ..string.pack(64 + lo);
+    }
+}

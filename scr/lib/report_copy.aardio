@@ -1,0 +1,80 @@
+// report_copy.aardio -- 经营报表纯值复制
+// 从 经营报表/{公司}.xlsx 的 指标统计!D4:O20 复制到目标同名 Sheet 的 G2:R18
+
+namespace report_copy {
+
+    run = function(cfg, outputWb) {
+        ..print("=== 经营报表汇总 ===");
+
+        var sourceFolder = ..io.joinpath(cfg.sourcePath, "经营报表");
+        
+        if (!..io.exist(sourceFolder)) {
+            ..print("错误: 经营报表文件夹不存在: " + sourceFolder);
+            return 0;
+        }
+
+        var processedCount = 0;
+        var errorCount = 0;
+        var totalCompanies = #cfg.allCompanies;
+
+        for (i = 1; totalCompanies; 1) {
+            var company = cfg.allCompanies[i];
+            if (processOne(company, i, totalCompanies, sourceFolder, outputWb)) {
+                processedCount = processedCount + 1;
+            } else {
+                errorCount = errorCount + 1;
+            }
+        }
+
+        ..print("经营报表汇总完成: 成功 " + tostring(processedCount) + "/" + tostring(totalCompanies) + (errorCount > 0 ? "，失败 " + tostring(errorCount) : ""));
+        return processedCount;
+    }
+
+    processOne = function(company, index, total, sourceFolder, outputWb) {
+        var sourceFile = ..io.joinpath(sourceFolder, company.sourceFile);
+
+        if (!..io.exist(sourceFile)) {
+            ..print("  [跳过] 源文件不存在: " + company.sourceFile);
+            return false;
+        }
+
+        ..print("  [" + tostring(index) + "/" + tostring(total) + "] " + company.name + " ...");
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+        if (!srcWb) {
+            ..print("  [失败] 无法打开: " + company.sourceFile);
+            return false;
+        }
+
+        var sourceSheet = "指标统计";
+        var sourceRange = "D4:O20";
+        var targetRange = "G2:R18";
+
+        if (!..excel.sheetExists(srcWb, sourceSheet)) {
+            ..print("  [失败] 源文件中未找到 '" + sourceSheet + "' Sheet");
+            ..excel.closeWorkbook(srcWb);
+            return false;
+        }
+
+        var srcWs = ..excel.getSheet(srcWb, sourceSheet);
+
+        if (!..excel.sheetExists(outputWb, company.name)) {
+            ..print("  [失败] 输出文件中未找到 '" + company.name + "' Sheet");
+            ..excel.closeWorkbook(srcWb);
+            return false;
+        }
+
+        var dstWs = ..excel.getSheet(outputWb, company.name);
+
+        var ok = ..excel.copyRangeValues(srcWs, sourceRange, dstWs, targetRange);
+        ..excel.closeWorkbook(srcWb);
+
+        if (ok) {
+            ..print("    完成");
+            return true;
+        } else {
+            ..print("  [失败] 复制失败");
+            return false;
+        }
+    }
+}

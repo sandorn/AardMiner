@@ -1,0 +1,415 @@
+// hotel.aardio -- 酒店业态数据汇总
+
+// 对应 VBA: 酒店数据汇总.bas
+
+// 功能: 从双数据源汇总 2 家酒店数据
+//       营销活动: 活动量/{公司}.xlsx "酒店类" → 输出 "酒店类" C2:D5
+//       业务指标: 经营报表/{公司}.xlsx "指标统计" → 输出 "酒店类" F2:G13 + J2:K13
+// 入口: hotel.run(cfg, outputWb)
+
+namespace hotel {
+
+    var _activityFolder = "";
+
+    var _reportFolder = "";
+
+    var _outputWb = null;
+
+    _ACTIVITY_SHEET = "酒店类";
+
+    _REPORT_SHEET = "指标统计";
+
+    _HTL_TARGET_SHEET = "酒店类";
+
+    // 伯豪瑞廷源行号 (三行分组: 官微/抖音/OTA)
+
+    var BHRT_PUT_ROW1 = 12;     // 投放数量-官微
+
+    var BHRT_PUT_ROW2 = 13;     // 投放数量-抖音
+
+    var BHRT_PUT_ROW3 = 14;     // 投放数量-OTA
+
+    var BHRT_AUD_ROW1 = 15;     // 受众数量-官微
+
+    var BHRT_AUD_ROW2 = 16;     // 受众数量-抖音
+
+    var BHRT_AUD_ROW3 = 17;     // 受众数量-OTA
+
+    var BHRT_DEAL_ROW1 = 18;    // 成交数量-官微
+
+    var BHRT_DEAL_ROW2 = 19;    // 成交数量-抖音
+
+    var BHRT_DEAL_ROW3 = 20;    // 成交数量-OTA
+
+    // 重庆瑞尔源行号 (单行)
+
+    var CQRER_PUT_ROW = 12;
+
+    var CQRER_AUD_ROW = 13;
+
+    var CQRER_DEAL_ROW = 14;
+
+    // 目标列
+
+    var TARGET_COL_BHRT = 3;      // C列 伯豪瑞廷
+
+    var TARGET_COL_CQRER = 4;     // D列 重庆瑞尔
+
+    // 业务指标目标列
+
+    var TARGET_OTA_COL_BHRT = 6;   // F列 伯豪瑞廷OTA
+
+    var TARGET_OTA_COL_CQRER = 7;  // G列 重庆瑞尔OTA
+
+    var TARGET_OCC_COL_BHRT = 10;  // J列 伯豪瑞廷入住率
+
+    var TARGET_OCC_COL_CQRER = 11; // K列 重庆瑞尔入住率
+
+    var TARGET_MONTH_START_ROW = 2;// 1月所在行
+
+    // 经营报表中指标行号
+
+    var REPORT_ROW_OCCUPANCY = 15;  // 月均入住率
+
+    var REPORT_ROW_OTA_RATING = 17; // OTA网络评价
+
+    // ---- 必须在 run 之前定义 ----
+
+    // 伯豪瑞廷: 对指定行的 1..numMonths 月提取数字求和
+
+    var _sumActivityBHRT = function(ws, srcRow, numMonths) {
+
+        var total = 0.0;
+
+        for (m = 1; numMonths; 1) {
+
+            var col = 2 * m + 3;  // E=5, G=7, I=9, ...
+
+            var v = ..excel.readCell(ws, srcRow, col);
+            total = total + ..common.ExtractNumberFromCell(v);
+
+        }
+
+        return total;
+
+    }
+
+    // ---- 伯豪瑞廷营销活动 (达成列: 2*m+3, E=5起始) ----
+
+    var _processActivityBHRT = function(numMonths) {
+
+        var sourceFile = ..io.joinpath(_activityFolder, "伯豪瑞廷.xlsx");
+
+        if (!..io.exist(sourceFile)) {
+
+            ..print("    [跳过] 源文件不存在");
+
+            return;
+
+        }
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+
+        if (!srcWb) return;
+
+        if (!..excel.sheetExists(srcWb, _ACTIVITY_SHEET)) {
+
+            ..print("    [跳过] 未找到 '" + _ACTIVITY_SHEET + "' Sheet");
+
+            ..excel.closeWorkbook(srcWb);
+
+            return;
+
+        }
+
+        var ws = ..excel.getSheet(srcWb, _ACTIVITY_SHEET);
+
+        // 三行分别求和
+
+        var putTotal = _sumActivityBHRT(ws, BHRT_PUT_ROW1, numMonths)
+
+                     + _sumActivityBHRT(ws, BHRT_PUT_ROW2, numMonths)
+
+                     + _sumActivityBHRT(ws, BHRT_PUT_ROW3, numMonths);
+
+        var audTotal = _sumActivityBHRT(ws, BHRT_AUD_ROW1, numMonths)
+
+                     + _sumActivityBHRT(ws, BHRT_AUD_ROW2, numMonths)
+
+                     + _sumActivityBHRT(ws, BHRT_AUD_ROW3, numMonths);
+
+        var dealTotal = _sumActivityBHRT(ws, BHRT_DEAL_ROW1, numMonths)
+
+                      + _sumActivityBHRT(ws, BHRT_DEAL_ROW2, numMonths)
+
+                      + _sumActivityBHRT(ws, BHRT_DEAL_ROW3, numMonths);
+
+        var wsTarget = ..excel.getSheet(_outputWb, _HTL_TARGET_SHEET);
+
+        ..excel.writeCell(wsTarget, 2, TARGET_COL_BHRT, putTotal);
+
+        ..excel.writeCell(wsTarget, 3, TARGET_COL_BHRT, audTotal);
+
+        ..excel.writeCell(wsTarget, 4, TARGET_COL_BHRT, dealTotal);
+
+        ..excel.closeWorkbook(srcWb);
+
+    }
+
+    var _sumActivityCQRER = function(ws, srcRow, numMonths) {
+
+        var total = 0.0;
+
+        for (m = 1; numMonths; 1) {
+
+            var col = 2 * m + 2;  // D=4, F=6, H=8, ...
+
+            var v = ..excel.readCell(ws, srcRow, col);
+
+            total = total + ..common.ExtractNumberFromCell(v);
+
+        }
+
+        return total;
+
+    }
+
+    // ---- 重庆瑞尔营销活动 (达成列: 2*m+2, D=4起始) ----
+
+    var _processActivityCQRER = function(numMonths) {
+
+        var sourceFile = ..io.joinpath(_activityFolder, "重庆瑞尔.xlsx");
+
+        if (!..io.exist(sourceFile)) {
+
+            ..print("    [跳过] 源文件不存在");
+
+            return;
+
+        }
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+
+        if (!srcWb) return;
+
+        if (!..excel.sheetExists(srcWb, _ACTIVITY_SHEET)) {
+
+            ..print("    [跳过] 未找到 '" + _ACTIVITY_SHEET + "' Sheet");
+
+            ..excel.closeWorkbook(srcWb);
+
+            return;
+
+        }
+
+        var ws = ..excel.getSheet(srcWb, _ACTIVITY_SHEET);
+
+        var putTotal = _sumActivityCQRER(ws, CQRER_PUT_ROW, numMonths);
+
+        var audTotal = _sumActivityCQRER(ws, CQRER_AUD_ROW, numMonths);
+
+        var dealTotal = _sumActivityCQRER(ws, CQRER_DEAL_ROW, numMonths);
+
+        var wsTarget = ..excel.getSheet(_outputWb, _HTL_TARGET_SHEET);
+
+        ..excel.writeCell(wsTarget, 2, TARGET_COL_CQRER, putTotal);
+
+        ..excel.writeCell(wsTarget, 3, TARGET_COL_CQRER, audTotal);
+
+        ..excel.writeCell(wsTarget, 4, TARGET_COL_CQRER, dealTotal);
+
+        ..excel.closeWorkbook(srcWb);
+
+    }
+
+    // ---- 转化率公式 ----
+
+    var _writeConversionFormulas = function() {
+
+        var wsTarget = ..excel.getSheet(_outputWb, _HTL_TARGET_SHEET);
+
+        // C5 = C4/C3 (伯豪瑞廷)
+
+        ..excel.writeFormula(wsTarget, 5, TARGET_COL_BHRT,
+
+            "=" + ..common.ColLetter(TARGET_COL_BHRT) + "4/" + ..common.ColLetter(TARGET_COL_BHRT) + "3");
+
+        // D5 = D4/D3 (重庆瑞尔)
+
+        ..excel.writeFormula(wsTarget, 5, TARGET_COL_CQRER,
+
+            "=" + ..common.ColLetter(TARGET_COL_CQRER) + "4/" + ..common.ColLetter(TARGET_COL_CQRER) + "3");
+
+        ..excel.setNumberFormat(wsTarget, "C5", "0.0000%");
+
+        ..excel.setNumberFormat(wsTarget, "D5", "0.0000%");
+
+    }
+
+    // ---- 业务指标 (从经营报表/指标统计) ----
+
+    var _processReport = function(companyName, targetOccCol, targetOtaCol, numMonths) {
+
+        var sourceFile = ..io.joinpath(_reportFolder, companyName + ".xlsx");
+
+        if (!..io.exist(sourceFile)) {
+
+            ..print("    [跳过] 经营报表不存在: " + companyName + ".xlsx");
+
+            return;
+
+        }
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+
+        if (!srcWb) return;
+
+        if (!..excel.sheetExists(srcWb, _REPORT_SHEET)) {
+
+            ..print("    [跳过] 未找到 '" + _REPORT_SHEET + "' Sheet");
+
+            ..excel.closeWorkbook(srcWb);
+
+            return;
+
+        }
+
+        var ws = ..excel.getSheet(srcWb, _REPORT_SHEET);
+
+        var wsTarget = ..excel.getSheet(_outputWb, _HTL_TARGET_SHEET);
+
+        // 逐月写入 (数据列 col = m + 3, D=4起始)
+
+        for (m = 1; 12; 1) {
+
+            var col = m + 3;           // D=4(1月), E=5(2月), ...
+
+            var targetRow = TARGET_MONTH_START_ROW + m - 1;
+
+            // 月均入住率 (第15行)
+
+            if (m <= numMonths) {
+
+                var v = ..excel.readCell(ws, REPORT_ROW_OCCUPANCY, col);
+
+                ..excel.writeCellRaw(wsTarget, targetRow, targetOccCol, v);
+
+            } else {
+
+                ..excel.writeNA(wsTarget, targetRow, targetOccCol);
+
+            }
+
+            // OTA网络评价 (第17行)
+
+            if (m <= numMonths) {
+
+                var v = ..excel.readCell(ws, REPORT_ROW_OTA_RATING, col);
+
+                ..excel.writeCellRaw(wsTarget, targetRow, targetOtaCol, v);
+
+            } else {
+
+                ..excel.writeNA(wsTarget, targetRow, targetOtaCol);
+
+            }
+
+        }
+
+        ..excel.closeWorkbook(srcWb);
+
+    }
+
+    // ---- 格式设置 ----
+
+    var _formatSheet = function() {
+
+        var wsTarget = ..excel.getSheet(_outputWb, _HTL_TARGET_SHEET);
+
+        ..excel.setNumberFormat(wsTarget, "C2:D4", "#,##0");
+
+        ..excel.setNumberFormat(wsTarget, "F2:G13", "0.00");
+
+        ..excel.setNumberFormat(wsTarget, "J2:K13", "0%");
+
+    }
+
+    run = function(cfg, outputWb) {
+
+        ..print("=== 酒店数据汇总 ===");
+
+        _activityFolder = ..io.joinpath(cfg.sourcePath, "活动量");
+
+        _reportFolder = ..io.joinpath(cfg.sourcePath, "经营报表");
+
+        _outputWb = outputWb;
+
+        if (!..io.exist(_activityFolder)) {
+
+            ..print("错误: 活动量文件夹不存在: " + _activityFolder);
+
+            return 0;
+
+        }
+
+        if (!..io.exist(_reportFolder)) {
+
+            ..print("错误: 经营报表文件夹不存在: " + _reportFolder);
+
+            return 0;
+
+        }
+
+        if (!..excel.sheetExists(outputWb, _HTL_TARGET_SHEET)) {
+
+            ..print("错误: 输出文件中未找到 '" + _HTL_TARGET_SHEET + "' Sheet");
+
+            return 0;
+
+        }
+
+        var numMonths = cfg.targetMonth;
+
+        if (numMonths < 1 || numMonths > 12) {
+
+            ..print("错误: 无效的报告月份: " + tostring(numMonths));
+
+            return 0;
+
+        }
+
+        // 营销活动
+
+        ..print("  [营销活动] 伯豪瑞廷 ...");
+
+        _processActivityBHRT(numMonths);
+
+        ..print("  [营销活动] 重庆瑞尔 ...");
+
+        _processActivityCQRER(numMonths);
+
+        // 转化率公式
+
+        _writeConversionFormulas();
+
+        // 业务指标 (从经营报表)
+
+        ..print("  [业务指标] 伯豪瑞廷 ...");
+
+        _processReport("伯豪瑞廷", TARGET_OCC_COL_BHRT, TARGET_OTA_COL_BHRT, numMonths);
+
+        ..print("  [业务指标] 重庆瑞尔 ...");
+
+        _processReport("重庆瑞尔", TARGET_OCC_COL_CQRER, TARGET_OTA_COL_CQRER, numMonths);
+
+        // 格式
+
+        _formatSheet();
+
+        ..print("酒店数据汇总完成");
+
+        return 2;
+
+    }
+
+}

@@ -1,0 +1,292 @@
+// commercial.aardio -- 商写业态数据汇总
+
+// 对应 VBA: 商写数据汇总.bas
+
+// 功能: 从 活动量/{公司}.xlsx "写字楼和商业综合体类" Sheet 汇总 5 家公司
+//       写入输出文件 "商写类" Sheet C2:G18
+// 入口: commercial.run(cfg, outputWb)
+
+namespace commercial {
+
+    var _sourceFolder = "";    // 活动量文件夹路径
+
+    var _outputWb = null;
+
+    // 源 Sheet 名
+
+    _COMM_SOURCE_SHEET = "写字楼和商业综合体类";
+
+    // 目标 Sheet 名
+
+    _COMM_TARGET_SHEET = "商写类";
+
+    // 源行号常量
+
+    var ROW_BASE_AREA = 4;       // 期初面积
+
+    var ROW_NEW_SIGN = 5;        // 新增签约面积
+
+    var ROW_RETREAT = 7;         // 本期退租面积
+
+    var ROW_END_AREA = 8;        // 月末面积
+
+    var ROW_CH_LEAD = 9;         // 渠道带客
+
+    var ROW_CH_DEAL = 10;        // 渠道成交
+
+    var ROW_CH_SIGN = 11;        // 渠道签约面积
+
+    var ROW_SELF_LEAD = 14;      // 自营带客
+
+    var ROW_SELF_DEAL = 15;      // 自营成交
+
+    var ROW_SELF_SIGN = 16;      // 自营签约面积
+
+    var ROW_EXPIRE = 19;         // 到期面积
+
+    var ROW_RENEW = 20;          // 续签面积
+
+    // 公司配置: 名称 → 目标列
+
+    var _companies = {
+
+        {"北京中言", 3},   // C列
+
+        {"大连凯丹", 4},   // D列
+
+        {"福建钱隆", 5},   // E列
+
+        {"春夏秋冬", 6},   // F列
+
+        {"重庆宜新", 7}    // G列
+
+    };
+
+    // ---- 必须在 run 之前定义 ----
+
+    var _processCompany = function(companyName, targetCol, wsTarget, numMonths, lastMonthCol) {
+
+        var sourceFile = ..io.joinpath(_sourceFolder, companyName + ".xlsx");
+
+        if (!..io.exist(sourceFile)) {
+
+            ..print("    [跳过] 源文件不存在: " + companyName + ".xlsx");
+
+            return false;
+
+        }
+
+        var srcWb = ..excel.openWorkbook(sourceFile, true);
+
+        if (!srcWb) return false;
+
+        if (!..excel.sheetExists(srcWb, _COMM_SOURCE_SHEET)) {
+
+            ..print("    [跳过] 未找到 '" + _COMM_SOURCE_SHEET + "' Sheet");
+
+            ..excel.closeWorkbook(srcWb);
+
+            return false;
+
+        }
+
+        var ws = ..excel.getSheet(srcWb, _COMM_SOURCE_SHEET);
+
+        // Row 2: 期初面积 = 1月达成(D4)
+
+        var v = ..common.SafeRead(ws, ROW_BASE_AREA, 4);
+
+        ..excel.writeCell(wsTarget, 2, targetCol, v);
+
+        // Row 3: 新增签约面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_NEW_SIGN, numMonths);
+
+        ..excel.writeCell(wsTarget, 3, targetCol, v);
+
+        // Row 4: 平均租金 = 0 (预留)
+
+        ..excel.writeCell(wsTarget, 4, targetCol, 0);
+
+        // Row 5: 本期退租面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_RETREAT, numMonths);
+
+        ..excel.writeCell(wsTarget, 5, targetCol, v);
+
+        // Row 6: 月末面积 = 报告月当月值
+
+        v = ..common.SafeRead(ws, ROW_END_AREA, lastMonthCol);
+
+        ..excel.writeCell(wsTarget, 6, targetCol, v);
+
+        // Row 7: 渠道带客 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_CH_LEAD, numMonths);
+
+        ..excel.writeCell(wsTarget, 7, targetCol, v);
+
+        // Row 8: 渠道成交 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_CH_DEAL, numMonths);
+
+        ..excel.writeCell(wsTarget, 8, targetCol, v);
+
+        // Row 9: 渠道签约面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_CH_SIGN, numMonths);
+
+        ..excel.writeCell(wsTarget, 9, targetCol, v);
+
+        // Row 10: 成交周期(渠道) = 0 (预留)
+
+        ..excel.writeCell(wsTarget, 10, targetCol, 0);
+
+        // Row 11: 渠道转化率 = col8/col7 (公式)
+
+        // 在 _writeFormulas 中统一写入
+
+        // Row 12: 自营带客 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_SELF_LEAD, numMonths);
+
+        ..excel.writeCell(wsTarget, 12, targetCol, v);
+
+        // Row 13: 自营成交 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_SELF_DEAL, numMonths);
+
+        ..excel.writeCell(wsTarget, 13, targetCol, v);
+
+        // Row 14: 自营签约面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_SELF_SIGN, numMonths);
+
+        ..excel.writeCell(wsTarget, 14, targetCol, v);
+
+        // Row 15: 成交周期(自营) = 0 (预留)
+
+        ..excel.writeCell(wsTarget, 15, targetCol, 0);
+
+        // Row 16: 自营转化率 = col13/col12 (公式)
+
+        // 在 _writeFormulas 中统一写入
+
+        // Row 17: 到期面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_EXPIRE, numMonths);
+
+        ..excel.writeCell(wsTarget, 17, targetCol, v);
+
+        // Row 18: 续签面积 YTD
+
+        v = ..common.SumAchievementCols(ws, ROW_RENEW, numMonths);
+
+        ..excel.writeCell(wsTarget, 18, targetCol, v);
+
+        ..excel.closeWorkbook(srcWb);
+
+        return true;
+
+    }
+
+    var _writeFormulas = function(wsTarget) {
+
+        // C=3 到 G=7
+
+        for (col = 3; 7; 1) {
+
+            var letter = ..common.ColLetter(col);
+
+            // Row 11: 渠道转化率 = 渠道成交/渠道带客 = col8/col7
+
+            ..excel.writeFormula(wsTarget, 11, col,
+
+                "=" + letter + "8/" + letter + "7");
+
+            // Row 16: 自营转化率 = 自营成交/自营带客 = col13/col12
+
+            ..excel.writeFormula(wsTarget, 16, col,
+
+                "=" + letter + "13/" + letter + "12");
+
+        }
+
+        // 格式
+
+        ..excel.setNumberFormat(wsTarget, "C11:G11", "0%");
+
+        ..excel.setNumberFormat(wsTarget, "C16:G16", "0%");
+
+    }
+
+    run = function(cfg, outputWb) {
+
+        ..print("=== 商写数据汇总 ===");
+
+        _sourceFolder = ..io.joinpath(cfg.sourcePath, "活动量");
+
+        _outputWb = outputWb;
+
+        if (!..io.exist(_sourceFolder)) {
+
+            ..print("错误: 活动量文件夹不存在: " + _sourceFolder);
+
+            return 0;
+
+        }
+
+        // 检查目标 Sheet
+
+        if (!..excel.sheetExists(outputWb, _COMM_TARGET_SHEET)) {
+
+            ..print("错误: 输出文件中未找到 '" + _COMM_TARGET_SHEET + "' Sheet");
+
+            return 0;
+
+        }
+
+        var numMonths = cfg.targetMonth;
+
+        if (numMonths < 1 || numMonths > 12) {
+            ..print("错误: 无效的报告月份: " + tostring(numMonths));
+
+            return 0;
+
+        }
+
+        var wsTarget = ..excel.getSheet(outputWb, _COMM_TARGET_SHEET);
+
+        var lastMonthCol = 2 * numMonths + 2;
+
+        var processedCount = 0;
+
+        var totalCompanies = #_companies;
+
+        for (i = 1; totalCompanies; 1) {
+
+            var cName = _companies[i][1];
+
+            var cCol = _companies[i][2];
+
+            ..print("  [" + tostring(i) + "/" + tostring(totalCompanies) + "] " + cName + " ...");
+
+            if (_processCompany(cName, cCol, wsTarget, numMonths, lastMonthCol)) {
+
+                processedCount = processedCount + 1;
+
+            }
+
+        }
+
+        // 写入转化率公式和格式
+
+        _writeFormulas(wsTarget);
+
+        ..print("商写数据汇总完成: " + tostring(processedCount) + "/" + tostring(totalCompanies));
+
+        return processedCount;
+
+    }
+
+}

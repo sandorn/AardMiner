@@ -1,0 +1,67 @@
+// models.aardio -- 数据结构定义
+namespace models {
+
+    // 公司信息
+    class Company {
+        ctor(name, sector, isBhrt = false) {
+            this.name = name;
+            this.sector = sector;       // "insurance" | "commercial" | "hotel"
+            this.isBhrt = isBhrt;       // 仅酒店业态：true=伯豪瑞廷(E列起始)
+            this.sourceFile = name + ".xlsx";
+            this.targetCol = 0;         // 由汇总模块设置
+        }
+    }
+
+    // 板块分析结果
+    class SectorResult {
+        ctor(sectorName) {
+            this.sectorName = sectorName;
+            this.content = "";
+            this.success = false;
+            this.errorMsg = "";
+        }
+    }
+
+    // 公司分析结果
+    class CompanyResult {
+        ctor(companyName) {
+            this.companyName = companyName;
+            this.content = "";
+            this.qualityScore = 0;
+            this.hasSummary = false;
+            this.hasRevenue = false;
+            this.hasEbitda = false;
+            this.hasCashFlow = false;
+            this.hasExpense = false;
+            this.retriesUsed = 0;
+            this.success = false;
+            this.errorMsg = "";
+        }
+    }
+
+    // 配置对象（由 config.aardio 填充）
+    class AppConfig {
+        ctor() {
+            this.sourcePath = "";
+            this.outputPath = "";
+            this.targetMonth = 0;
+            this.targetYear = 0;
+            this.progressPercent = 0.0;
+            this.apiKey = "";
+            this.model = "deepseek-chat";
+            this.sectorTimeoutMs = 30000;
+            this.sectorMaxTokens = 1000;
+            this.companyTimeoutMs = 60000;
+            this.companyMaxTokens = 1500;
+            this.companyMaxRetries = 2;
+            this.companyBatchSize = 3;
+            this.companyBatchDelayMs = 1000;
+            this.qualityThreshold = 8;
+            this.insuranceCompanies = {};   // Company[]
+            this.commercialCompanies = {};  // Company[]
+            this.hotelCompanies = {};       // Company[]
+            this.allCompanies = {};         // Company[] (按填写页C2:C10顺序)
+            this.prompts = {};              // { insurance, commercial, hotel, financial }
+        }
+    }
+}
