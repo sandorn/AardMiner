@@ -64,15 +64,13 @@ namespace config {
     }
 
     loadCompanies = function(cfg) {
-        var jsonPath = ..io.fullpath("/resources/companies.json");
-        if (!..io.exist(jsonPath)) {
-            jsonPath = "resources\\companies.json";
-        }
-        if (!..io.exist(jsonPath)) {
+        // string.load 优先读磁盘，找不到自动从内嵌资源加载
+        var text;
+        try { text = ..string.load("/resources/companies.json"); } catch(e) { text = null; }
+        if (!text) {
             ..print("警告: 未找到 companies.json，使用内置默认配置");
             return loadDefaultCompanies(cfg);
         }
-        var text = ..string.load(jsonPath);
         var data = ..JSON.parse(text);
 
         if (data.insurance) {
@@ -144,7 +142,6 @@ namespace config {
 
     loadPrompts = function(cfg) {
         cfg.prompts = {};
-        var promptDir = ..io.fullpath("/resources/prompts");
         var promptFiles = {
             insurance = "保险分析.md",
             commercial = "商写分析.md",
@@ -152,11 +149,13 @@ namespace config {
             financial = "经营分析.md"
         };
         for (k, v in promptFiles) {
-            var fpath = promptDir ++ "\\" + v;
-            if (..io.exist(fpath)) {
-                cfg.prompts[k] = ..string.load(fpath);
+            // string.load 优先读磁盘，找不到自动从内嵌资源加载
+            var content;
+            try { content = ..string.load("/resources/prompts/" + v); } catch(e) { content = null; }
+            if (content) {
+                cfg.prompts[k] = content;
             } else {
-                ..print("警告: 未找到提示词文件: " + fpath);
+                ..print("警告: 未找到提示词文件: " + v);
                 cfg.prompts[k] = "";
             }
         }
