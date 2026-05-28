@@ -72,31 +72,31 @@ namespace deepseek_api {
                 statusCode = http.statusCode;
             } catch (e) {
                 lastError = _formatError(contextName, "网络错误", tostring(e));
-                isRetryable = true;
                 if (retryCount < maxRetries) {
                     var waitSec = 2 ** retryCount;
                     sleep(waitSec * 1000);
                 }
-                continue;
             }
-            if (statusCode == 200 && #result > 0) {
-                if (debugMode) {
-                    ..print(_formatLog(contextName, "API响应成功，长度: " + tostring(#result)));
+            if (statusCode != 0) {
+                if (statusCode == 200 && #result > 0) {
+                    if (debugMode) {
+                        ..print(_formatLog(contextName, "API响应成功，长度: " + tostring(#result)));
+                    }
+                    return result;
                 }
-                return result;
-            }
-            lastError = _formatError(contextName, "API错误", tostring(statusCode));
-            isRetryable = _isRetryableStatus(statusCode);
-            if (debugMode && #result > 0) {
-                ..print(_formatLog(contextName, "错误详情: " + ..string.slice(result, 1, 500)));
-            }
-            if (!isRetryable) return lastError;
-            if (retryCount < maxRetries) {
-                var waitSec = 2 ** retryCount;
-                if (debugMode) {
-                    ..print(_formatLog(contextName, "等待 " + tostring(waitSec) + " 秒后重试..."));
+                lastError = _formatError(contextName, "API错误", tostring(statusCode));
+                isRetryable = _isRetryableStatus(statusCode);
+                if (debugMode && #result > 0) {
+                    ..print(_formatLog(contextName, "错误详情: " + ..string.slice(result, 1, 500)));
                 }
-                sleep(waitSec * 1000);
+                if (!isRetryable) return lastError;
+                if (retryCount < maxRetries) {
+                    var waitSec = 2 ** retryCount;
+                    if (debugMode) {
+                        ..print(_formatLog(contextName, "等待 " + tostring(waitSec) + " 秒后重试..."));
+                    }
+                    sleep(waitSec * 1000);
+                }
             }
         }
         return lastError;
