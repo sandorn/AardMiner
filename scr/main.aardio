@@ -241,7 +241,11 @@ var _runPhase1 = function(cfg, outputWb) {
     var ok = 0;
 
     // 经营报表复制 (9家)
-    ok = ..report_copy.run(cfg, outputWb);
+    try {
+        ok = ..report_copy.run(cfg, outputWb);
+    } catch (e) {
+        log("经营报表复制执行异常: " + tostring(e));
+    }
     log("");
 
     // 保险汇总 (2家) - 每个子步骤独立容错

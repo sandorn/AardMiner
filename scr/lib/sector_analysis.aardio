@@ -125,7 +125,7 @@ namespace sector_analysis {
         }
 
         var dataPrompt = "以下是两家保险中介类子公司的经营对比数据，请根据系统提示词进行分析，并按指定输出格式给出分析结果。" +
-            '\r\n' + buildInsuranceDataPrompt(dataArray, cfg.targetMonth);
+            '\r\n' + buildInsuranceDataPrompt(dataArray, cfg.targetMonth > 0 ? cfg.targetMonth : 12);
 
         var apiResponse = ..deepseek_api.CallDeepSeekAPI(
             dataPrompt, cfg.apiKey, "https://api.deepseek.com", cfg.model,

@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<project name="AardMiner" ui="win" output="AardMiner.exe" dstrip="false" CompanyName="AardMiner" FileDescription="经营数据汇总分析工具" LegalCopyright="Copyright (C) 2025" ProductName="AardMiner" InternalName="AardMiner" FileVersion="0.0.2.0" ProductVersion="0.0.2.0" publishDir="/Publish/" local="false" libEmbed="true" ignored="false">
+<project name="AardMiner" ui="win" output="AardMiner.exe" dstrip="false" CompanyName="AardMiner" FileDescription="经营数据汇总分析工具" LegalCopyright="Copyright (C) 2026" ProductName="AardMiner" InternalName="AardMiner" FileVersion="0.0.2.0" ProductVersion="0.0.2.0" publishDir="/Publish/" local="false" libEmbed="true" ignored="false">
 	<file name="main" path="main.aardio"/>
 	<folder name="resources" path="resources" local="false" embed="true" ignored="false">
 		<file name="companies.json" path="resources\companies.json"/>

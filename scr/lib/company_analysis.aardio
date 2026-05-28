@@ -84,17 +84,18 @@ namespace company_analysis {
     // AnalyzeWithQualityCheck -- 带质量检查的分析（含重试）
     // 对应 VBA: AnalyzeWithQualityCheck
     // ============================================================
-    AnalyzeWithQualityCheck = function(companyName, dataPrompt, apiKey, systemMsg, model) {
+    AnalyzeWithQualityCheck = function(companyName, dataPrompt, apiKey, systemMsg, cfg) {
         var analysisResult = "";
+        var maxRetries = cfg.companyMaxRetries ? cfg.companyMaxRetries : 2;
 
-        for (retryCount = 0; _MAX_RETRIES + 1; 1) {
+        for (retryCount = 0; maxRetries + 1; 1) {
             var apiResponse = ..deepseek_api.CallDeepSeekAPI(
                 dataPrompt, apiKey,
                 "https://api.deepseek.com",
-                model,
+                cfg.model,
                 _TEMPERATURE,
-                1500,  // maxTokens
-                60000, // timeoutMs
+                cfg.companyMaxTokens ? cfg.companyMaxTokens : 1500,
+                cfg.companyTimeoutMs ? cfg.companyTimeoutMs : 60000,
                 companyName,
                 false, // debugMode
                 1,     // maxRetries (no nested retry)
@@ -110,8 +111,9 @@ namespace company_analysis {
             analysisResult = ..deepseek_api.CleanAnalysisResult(analysisResult);
             var quality = CheckAnalysisQuality(analysisResult);
 
-            if (quality.score >= 8 || retryCount >= _MAX_RETRIES) {
-                if (quality.score < 8) {
+            var scoreThreshold = cfg.qualityThreshold ? cfg.qualityThreshold : 8;
+            if (quality.score >= scoreThreshold || retryCount >= maxRetries) {
+                if (quality.score < scoreThreshold) {
                     analysisResult = analysisResult + '\r\n\r\n' +
                         "[质量提示：本分析质量评分 " + tostring(quality.score) + "/10，部分指标描述可能不完整]";
                 }
@@ -181,7 +183,7 @@ namespace company_analysis {
             "请按系统提示词要求输出指定格式。" + '\r\n' +
             ..deepseek_api.BuildDataPrompt(wsData);
 
-        var analysisResult = AnalyzeWithQualityCheck(companyName, dataPrompt, apiKey, systemMsg, cfg.model);
+        var analysisResult = AnalyzeWithQualityCheck(companyName, dataPrompt, apiKey, systemMsg, cfg);
 
         if (#analysisResult > 0) {
             ..deepseek_api.WriteAnalysisResult(ws, _RESULT_CELL, analysisResult);
@@ -218,6 +220,8 @@ namespace company_analysis {
             return 0;
         }
 
+        var batchSize = cfg.companyBatchSize ? cfg.companyBatchSize : 3;
+        var batchDelayMs = cfg.companyBatchDelayMs ? cfg.companyBatchDelayMs : 1000;
         var totalCount = #companies;
         var processedCount = 0;
         var batchCount = 0;
@@ -233,9 +237,9 @@ namespace company_analysis {
                 processedCount = processedCount + 1;
             }
 
-            if (batchCount % _BATCH_SIZE == 0 && i < totalCount) {
-                ..print("  批次完成，等待 " + tostring(_BATCH_DELAY_MS) + "ms ...");
-                sleep(_BATCH_DELAY_MS);
+            if (batchCount % batchSize == 0 && i < totalCount) {
+                ..print("  批次完成，等待 " + tostring(batchDelayMs) + "ms ...");
+                sleep(batchDelayMs);
             }
         }
 

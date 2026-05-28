@@ -36,27 +36,61 @@ namespace config {
                     select(key) {
                         case "source_path" { cfg.sourcePath = val; }
                         case "output_file" { cfg.outputPath = val; }
+                        else { ..print("警告: 未知配置键 [" + section + "] " + key); }
                     }
                 }
                 case "report" {
                     select(key) {
-                        case "target_month" { cfg.targetMonth = tonumber(val); }
-                        case "target_year" { cfg.targetYear = tonumber(val); }
+                        case "target_month" {
+                            var n = tonumber(val); if (n != null) cfg.targetMonth = n;
+                            else ..print("警告: target_month 值无效: " + val);
+                        }
+                        case "target_year" {
+                            var n = tonumber(val); if (n != null) cfg.targetYear = n;
+                            else ..print("警告: target_year 值无效: " + val);
+                        }
+                        else { ..print("警告: 未知配置键 [" + section + "] " + key); }
                     }
                 }
                 case "analysis" {
                     select(key) {
                         case "model" { cfg.model = val; }
-                        case "sector_timeout_ms" { cfg.sectorTimeoutMs = tonumber(val); }
-                        case "sector_max_tokens" { cfg.sectorMaxTokens = tonumber(val); }
-                        case "company_timeout_ms" { cfg.companyTimeoutMs = tonumber(val); }
-                        case "company_max_tokens" { cfg.companyMaxTokens = tonumber(val); }
-                        case "company_max_retries" { cfg.companyMaxRetries = tonumber(val); }
-                        case "company_batch_size" { cfg.companyBatchSize = tonumber(val); }
-                        case "company_batch_delay_ms" { cfg.companyBatchDelayMs = tonumber(val); }
-                        case "quality_score_threshold" { cfg.qualityThreshold = tonumber(val); }
+                        case "sector_timeout_ms" {
+                            var n = tonumber(val); if (n != null) cfg.sectorTimeoutMs = n;
+                            else ..print("警告: sector_timeout_ms 值无效: " + val);
+                        }
+                        case "sector_max_tokens" {
+                            var n = tonumber(val); if (n != null) cfg.sectorMaxTokens = n;
+                            else ..print("警告: sector_max_tokens 值无效: " + val);
+                        }
+                        case "company_timeout_ms" {
+                            var n = tonumber(val); if (n != null) cfg.companyTimeoutMs = n;
+                            else ..print("警告: company_timeout_ms 值无效: " + val);
+                        }
+                        case "company_max_tokens" {
+                            var n = tonumber(val); if (n != null) cfg.companyMaxTokens = n;
+                            else ..print("警告: company_max_tokens 值无效: " + val);
+                        }
+                        case "company_max_retries" {
+                            var n = tonumber(val); if (n != null) cfg.companyMaxRetries = n;
+                            else ..print("警告: company_max_retries 值无效: " + val);
+                        }
+                        case "company_batch_size" {
+                            var n = tonumber(val); if (n != null) cfg.companyBatchSize = n;
+                            else ..print("警告: company_batch_size 值无效: " + val);
+                        }
+                        case "company_batch_delay_ms" {
+                            var n = tonumber(val); if (n != null) cfg.companyBatchDelayMs = n;
+                            else ..print("警告: company_batch_delay_ms 值无效: " + val);
+                        }
+                        case "quality_score_threshold" {
+                            var n = tonumber(val); if (n != null) cfg.qualityThreshold = n;
+                            else ..print("警告: quality_score_threshold 值无效: " + val);
+                        }
+                        else { ..print("警告: 未知配置键 [" + section + "] " + key); }
                     }
                 }
+                else { ..print("警告: 未知配置节 [" + section + "]"); }
             }
         }
 
@@ -120,6 +154,12 @@ namespace config {
 
     loadApiKey = function() {
         var userProfile = ..string.getenv("USERPROFILE");
+        if (!userProfile) userProfile = ..string.getenv("HOME");
+        if (!userProfile) userProfile = ..string.getenv("HOMEDRIVE") ++ ..string.getenv("HOMEPATH");
+        if (!userProfile) {
+            ..print("警告: 无法获取用户主目录，跳过 API Key 加载");
+            return "";
+        }
         var keyPath = userProfile ++ "\\.dskey";
         if (!..io.exist(keyPath)) {
             ..print("警告: 未找到 .dskey 文件: " + keyPath);

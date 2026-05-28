@@ -131,13 +131,19 @@ namespace excel {
         // 关闭所有已打开的工作簿（逆序关闭避免索引问题）
         for (i = #openedWbs; 1; -1) {
             var wb = openedWbs[i];
-            if (wb) wb.Close(false);
+            if (wb) {
+                try {
+                    wb.Close(false);
+                } catch (e) {}
+            }
         }
         openedWbs = {};
 
         // 退出 Excel 应用程序
         if (app) {
-            app.Quit();
+            try {
+                app.Quit();
+            } catch (e) {}
             app = null;
         }
     }

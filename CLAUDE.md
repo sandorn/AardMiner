@@ -48,7 +48,7 @@ scr/
 
 ## 注意事项
 
-- API key 文件 `~/.dskey` 格式: `EXCEL=sk-xxx`，不是普通 key
+- API key 文件路径 `%USERPROFILE%\.dskey`，格式: `EXCEL=sk-xxx`
 - Aardio 中 print 被重定向到 UI 日志编辑框
 - `config.loadAll()` 优先读磁盘文件，找不到自动从内嵌资源加载（适用于发布版）
 - 版本号在 `scr/default.aproj` 的 `FileVersion` / `ProductVersion` 属性中

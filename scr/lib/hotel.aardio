@@ -104,13 +104,13 @@ namespace hotel {
 
             ..print("    [跳过] 源文件不存在");
 
-            return;
+            return false;
 
         }
 
         var srcWb = ..excel.openWorkbook(sourceFile, true);
 
-        if (!srcWb) return;
+        if (!srcWb) return false;
 
         if (!..excel.sheetExists(srcWb, _ACTIVITY_SHEET)) {
 
@@ -118,7 +118,7 @@ namespace hotel {
 
             ..excel.closeWorkbook(srcWb);
 
-            return;
+            return false;
 
         }
 
@@ -154,6 +154,8 @@ namespace hotel {
 
         ..excel.closeWorkbook(srcWb);
 
+        return true;
+
     }
 
     var _sumActivityCQRER = function(ws, srcRow, numMonths) {
@@ -184,13 +186,13 @@ namespace hotel {
 
             ..print("    [跳过] 源文件不存在");
 
-            return;
+            return false;
 
         }
 
         var srcWb = ..excel.openWorkbook(sourceFile, true);
 
-        if (!srcWb) return;
+        if (!srcWb) return false;
 
         if (!..excel.sheetExists(srcWb, _ACTIVITY_SHEET)) {
 
@@ -198,7 +200,7 @@ namespace hotel {
 
             ..excel.closeWorkbook(srcWb);
 
-            return;
+            return false;
 
         }
 
@@ -219,6 +221,8 @@ namespace hotel {
         ..excel.writeCell(wsTarget, 4, TARGET_COL_CQRER, dealTotal);
 
         ..excel.closeWorkbook(srcWb);
+
+        return true;
 
     }
 
@@ -256,13 +260,13 @@ namespace hotel {
 
             ..print("    [跳过] 经营报表不存在: " + companyName + ".xlsx");
 
-            return;
+            return false;
 
         }
 
         var srcWb = ..excel.openWorkbook(sourceFile, true);
 
-        if (!srcWb) return;
+        if (!srcWb) return false;
 
         if (!..excel.sheetExists(srcWb, _REPORT_SHEET)) {
 
@@ -270,7 +274,7 @@ namespace hotel {
 
             ..excel.closeWorkbook(srcWb);
 
-            return;
+            return false;
 
         }
 
@@ -317,6 +321,8 @@ namespace hotel {
         }
 
         ..excel.closeWorkbook(srcWb);
+
+        return true;
 
     }
 
@@ -380,13 +386,15 @@ namespace hotel {
 
         // 营销活动
 
+        var processedCount = 0;
+
         ..print("  [营销活动] 伯豪瑞廷 ...");
 
-        _processActivityBHRT(numMonths);
+        if (_processActivityBHRT(numMonths)) processedCount = processedCount + 1;
 
         ..print("  [营销活动] 重庆瑞尔 ...");
 
-        _processActivityCQRER(numMonths);
+        if (_processActivityCQRER(numMonths)) processedCount = processedCount + 1;
 
         // 转化率公式
 
@@ -396,19 +404,19 @@ namespace hotel {
 
         ..print("  [业务指标] 伯豪瑞廷 ...");
 
-        _processReport("伯豪瑞廷", TARGET_OCC_COL_BHRT, TARGET_OTA_COL_BHRT, numMonths);
+        if (_processReport("伯豪瑞廷", TARGET_OCC_COL_BHRT, TARGET_OTA_COL_BHRT, numMonths)) processedCount = processedCount + 1;
 
         ..print("  [业务指标] 重庆瑞尔 ...");
 
-        _processReport("重庆瑞尔", TARGET_OCC_COL_CQRER, TARGET_OTA_COL_CQRER, numMonths);
+        if (_processReport("重庆瑞尔", TARGET_OCC_COL_CQRER, TARGET_OTA_COL_CQRER, numMonths)) processedCount = processedCount + 1;
 
         // 格式
 
         _formatSheet();
 
-        ..print("酒店数据汇总完成");
+        ..print("酒店数据汇总完成: " + tostring(processedCount) + "/4");
 
-        return 2;
+        return processedCount;
 
     }
 
